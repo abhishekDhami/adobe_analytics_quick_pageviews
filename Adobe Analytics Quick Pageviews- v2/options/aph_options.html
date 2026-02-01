@@ -1,0 +1,739 @@
+<!DOCTYPE html>
+<html>
+
+<head>
+    <title>Adobe Analytics Pageview Extension Options</title>
+    <meta name="viewport" content="width=device-width,initial-scale=1" />
+    <style>
+        :root {
+            --bg-page: #141416;
+            --panel-bg: #1f1f23;
+            --panel-elev: #27272b;
+            --input-bg: #111214;
+            --muted: #bfc3c8;
+            --text: #ffffff;
+            --accent: #03dac6;
+            --btn-bg: #2f7a74;
+            --btn-hover: #24907f;
+            --radius: 10px;
+            --danger: #ff5c5c;
+            --danger-600: #e04545;
+            --danger-700: #b83535;
+            --danger-100: rgba(255, 92, 92, 0.08);
+        }
+
+        /* Page base */
+        html,
+        body {
+            height: 100%;
+            margin: 0;
+            padding: 0;
+            background: linear-gradient(180deg, var(--bg-page) 0%, #0f0f10 100%);
+            color: var(--text);
+            font-family: Inter, "Segoe UI", Roboto, "Helvetica Neue", Arial, sans-serif;
+            -webkit-font-smoothing: antialiased;
+            -moz-osx-font-smoothing: grayscale;
+            padding: 28px 16px;
+            box-sizing: border-box;
+        }
+
+        main {
+            display: flex;
+            flex-direction: column;
+            gap: 18px;
+            align-items: center;
+            width: 100%;
+        }
+
+        /*
+         * Container ensures all panels share exact same outer width
+         * Panels inside will be width:100% (so their edges align perfectly)
+         */
+        .container {
+            width: 60%;
+            min-width: 320px;
+            max-width: 900px;
+            box-sizing: border-box;
+            display: flex;
+            flex-direction: column;
+            gap: 18px;
+            align-items: stretch;
+        }
+
+        @media (max-width: 900px) {
+            .container {
+                width: 70%;
+            }
+        }
+
+        @media (max-width: 600px) {
+            .container {
+                width: 92%;
+            }
+        }
+
+        /*
+         * Panels now take full width of .container so they always match
+         * Uniform padding included so inner content aligns too
+         */
+        .panel {
+            width: 100%;
+            background: linear-gradient(180deg, var(--panel-bg), var(--panel-elev));
+            border-radius: var(--radius);
+            box-shadow: 0 6px 18px rgba(0, 0, 0, 0.6);
+            padding: 18px 32px;
+            /* UNIFORM padding for all panels */
+            box-sizing: border-box;
+            color: var(--text);
+            margin: 0;
+        }
+
+        /* Force left alignment inside panels */
+        .panel,
+        .panel * {
+            text-align: left;
+        }
+
+        .step+.step {
+            margin-top: 6px;
+        }
+
+        /* ---------- Header improvements (Title section) ---------- */
+        /* Use the same panel styles for header to ensure matching width */
+        .config-header {
+            display: flex;
+            align-items: center;
+            justify-content: space-between;
+            gap: 12px;
+            width: 100%;
+            box-sizing: border-box;
+            padding-left: 12px;
+            /* small inset from left edge */
+            padding-right: 12px;
+            /* small inset from right edge */
+            margin: 0;
+        }
+
+        .title-left {
+            display: flex;
+            gap: 12px;
+            align-items: center;
+            flex: 1 1 auto;
+            min-width: 0;
+        }
+
+        .ext-icon {
+            width: 48px;
+            height: 48px;
+            border-radius: 10px;
+            flex: 0 0 48px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            background: linear-gradient(135deg, rgba(3, 218, 198, 0.12), rgba(255, 255, 255, 0.02));
+            box-shadow: 0 4px 12px rgba(0, 0, 0, 0.5), inset 0 1px 0 rgba(255, 255, 255, 0.02);
+            font-weight: 700;
+            color: var(--accent);
+            font-size: 18px;
+        }
+
+        .config-title {
+            margin: 0;
+            font-size: 18px;
+            font-weight: 700;
+            color: var(--text);
+            line-height: 1.1;
+            white-space: nowrap;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .config-subtitle {
+            margin: 4px 0 0 0;
+            font-size: 13px;
+            color: var(--muted);
+            font-weight: 400;
+            line-height: 1.1;
+            max-width: 100%;
+            overflow: hidden;
+            text-overflow: ellipsis;
+        }
+
+        .config-toggle {
+            display: flex;
+            align-items: center;
+            gap: 8px;
+            white-space: nowrap;
+            flex: 0 0 auto;
+        }
+
+        .toggle-label {
+            font-size: 13px;
+            color: var(--muted);
+            margin-top: 0;
+        }
+
+        /* ---------- Info icon / tooltip ---------- */
+        .info-icon {
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            width: 18px;
+            height: 18px;
+            border-radius: 50%;
+            font-size: 12px;
+            margin-left: 8px;
+            color: var(--muted);
+            background: rgba(255, 255, 255, 0.02);
+            border: 1px solid rgba(255, 255, 255, 0.02);
+            cursor: help;
+        }
+
+        .info-icon[title] {
+            position: relative;
+        }
+
+        /* ---------- Forms ---------- */
+        label {
+            display: block;
+            margin-top: 12px;
+            margin-bottom: 6px;
+            font-size: 13px;
+            color: var(--muted);
+            font-weight: 500;
+        }
+
+        label>input[type="checkbox"] {
+            margin-right: 8px;
+        }
+
+        label:has(input[type="checkbox"]) {
+            margin-top: 6px;
+            margin-bottom: 0;
+            font-weight: 400;
+            color: var(--text);
+            cursor: pointer;
+        }
+
+        .page-id-config {
+            margin-top: 14px;
+            padding-left: 2px;
+        }
+
+        input[type="text"],
+        input[type="password"],
+        select {
+            width: 100%;
+            padding: 10px 12px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.04);
+            background: var(--input-bg);
+            color: var(--text);
+            box-sizing: border-box;
+            font-size: 14px;
+            outline: none;
+            transition: box-shadow .12s, border-color .12s, filter .12s;
+        }
+
+        input::placeholder {
+            color: rgba(191, 195, 200, 0.45);
+        }
+
+        input:focus,
+        select:focus {
+            box-shadow: 0 6px 18px rgba(3, 218, 198, 0.06);
+            border-color: rgba(3, 218, 198, 0.24);
+        }
+
+        /* ---------- Disabled field styling ---------- */
+        input:disabled,
+        select:disabled,
+        input[disabled],
+        select[disabled] {
+            background: #0c0c0d;
+            color: rgba(255, 255, 255, 0.45);
+            border-color: rgba(255, 255, 255, 0.02);
+            cursor: not-allowed;
+            filter: grayscale(22%) contrast(0.95) brightness(0.92);
+            box-shadow: none;
+            opacity: 0.96;
+        }
+
+        input:disabled::placeholder,
+        select:disabled::placeholder {
+            color: rgba(191, 195, 200, 0.28);
+        }
+
+        /* Inline hint shown below disabled fields */
+        .disabled-hint {
+            margin-top: 8px;
+            font-size: 12px;
+            color: rgba(191, 195, 200, 0.72);
+            background: rgba(255, 255, 255, 0.01);
+            padding: 8px 10px;
+            border-radius: 8px;
+            border: 1px solid rgba(255, 255, 255, 0.02);
+            display: flex;
+            gap: 8px;
+            align-items: flex-start;
+        }
+
+        .disabled-hint .hint-emoji {
+            font-size: 14px;
+            margin-top: 2px;
+        }
+
+        /* ---------- Buttons ---------- */
+        .btn-row {
+            margin-top: 14px;
+            display: flex;
+            gap: 10px;
+            flex-wrap: wrap;
+            align-items: center;
+        }
+
+        button {
+            padding: 9px 14px;
+            border-radius: 8px;
+            border: 0;
+            cursor: pointer;
+            font-size: 13px;
+            color: #fff;
+            background: var(--btn-bg);
+            transition: transform .06s ease, background .12s;
+            box-shadow: 0 4px 10px rgba(0, 0, 0, 0.4);
+        }
+
+        button:hover {
+            background: var(--btn-hover);
+            transform: translateY(-1px);
+        }
+
+        button:active {
+            transform: translateY(0);
+        }
+
+        /* Generic secondary */
+        button.secondary {
+            background: transparent;
+            color: var(--muted);
+            border: 1px solid rgba(255, 255, 255, 0.04);
+            box-shadow: none;
+        }
+
+        button.secondary:hover {
+            background: rgba(255, 255, 255, 0.02);
+            color: var(--text);
+        }
+
+        button:disabled,
+        button[disabled] {
+            opacity: 0.45;
+            cursor: not-allowed !important;
+            filter: grayscale(40%);
+            box-shadow: none !important;
+            background: #3a3a3d !important;
+            /* muted grey */
+            border-color: rgba(255, 255, 255, 0.06) !important;
+            transform: none !important;
+        }
+
+        /* prevent hover effects on disabled buttons */
+        button:disabled:hover,
+        button[disabled]:hover {
+            background: #3a3a3d !important;
+            transform: none !important;
+        }
+
+        /* Clear button filled red */
+        .btn-clear {
+            background: var(--danger);
+            color: #fff;
+            border: 1px solid rgba(0, 0, 0, 0.12);
+            box-shadow: 0 6px 14px rgba(255, 92, 92, 0.08);
+        }
+
+        .btn-clear:hover {
+            background: var(--danger-700);
+            box-shadow: 0 8px 18px rgba(184, 53, 53, 0.12);
+        }
+
+        .btn-clear:active {
+            background: var(--danger-600);
+            transform: translateY(0);
+        }
+
+        button[hidden] {
+            display: none !important;
+        }
+
+        /* Toggle switch */
+        .switch {
+            position: relative;
+            width: 44px;
+            height: 24px;
+            display: inline-block;
+        }
+
+        .switch input {
+            display: none;
+        }
+
+        .slider {
+            position: absolute;
+            cursor: pointer;
+            inset: 0;
+            background-color: #3a3a3d;
+            border-radius: 24px;
+            transition: .18s;
+            box-shadow: inset 0 1px 0 rgba(255, 255, 255, 0.02);
+        }
+
+        .slider:before {
+            content: "";
+            position: absolute;
+            left: 3px;
+            top: 3px;
+            width: 18px;
+            height: 18px;
+            background: #fff;
+            border-radius: 50%;
+            transition: transform .18s;
+        }
+
+        .switch input:checked+.slider {
+            background: var(--accent);
+        }
+
+        .switch input:checked+.slider:before {
+            transform: translateX(20px);
+        }
+
+
+        .panel h3 {
+            margin: 0;
+            font-size: 16px;
+            color: var(--text);
+            font-weight: 600;
+        }
+
+        @media (max-width: 480px) {
+            .config-header {
+                flex-direction: column;
+                align-items: flex-start;
+                gap: 10px;
+            }
+
+            .config-toggle {
+                justify-content: flex-start;
+            }
+
+            .title-left {
+                width: 100%;
+            }
+        }
+
+        /* Toast container (top-right) */
+        .toast-container {
+            position: fixed;
+            top: 18px;
+            right: 18px;
+            display: flex;
+            flex-direction: column;
+            gap: 10px;
+            z-index: 9999;
+            pointer-events: none;
+            /* allow clicks through when no toasts */
+        }
+
+        /* Single toast */
+        .toast {
+            pointer-events: auto;
+            min-width: 260px;
+            max-width: 380px;
+            padding: 10px 12px;
+            border-radius: 10px;
+            box-shadow: 0 8px 24px rgba(0, 0, 0, 0.6);
+            color: var(--text);
+            background: rgba(40, 40, 44, 0.98);
+            border: 1px solid rgba(255, 255, 255, 0.04);
+            display: flex;
+            gap: 10px;
+            align-items: flex-start;
+            font-size: 14px;
+            line-height: 1.3;
+            opacity: 0;
+            transform: translateY(-6px) scale(.99);
+            transition: opacity .18s ease, transform .18s ease;
+        }
+
+        /* Show state (added by JS) */
+        .toast.show {
+            opacity: 1;
+            transform: translateY(0) scale(1);
+        }
+
+        /* Toast content */
+        .toast .toast-icon {
+            width: 36px;
+            height: 36px;
+            flex: 0 0 36px;
+            border-radius: 8px;
+            display: inline-flex;
+            align-items: center;
+            justify-content: center;
+            font-weight: 700;
+            font-size: 16px;
+        }
+
+        /* Text/stack */
+        .toast .toast-body {
+            flex: 1 1 auto;
+            min-width: 0;
+        }
+
+        .toast .toast-title {
+            font-weight: 600;
+            margin-bottom: 4px;
+        }
+
+        .toast .toast-msg {
+            color: var(--muted);
+            font-size: 13px;
+            margin: 0;
+        }
+
+        /* Close button */
+        .toast .toast-close {
+            background: transparent;
+            border: none;
+            color: rgba(255, 255, 255, 0.6);
+            cursor: pointer;
+            padding: 4px;
+            border-radius: 6px;
+            flex: 0 0 auto;
+        }
+
+        .toast .toast-close:hover {
+            color: var(--text);
+            background: rgba(255, 255, 255, 0.02);
+        }
+
+        /* Variants */
+        .toast.success {
+            background: rgba(3, 218, 198, 0.08);
+            border: 1px solid rgba(3, 218, 198, 0.25);
+            color: var(--accent);
+        }
+
+        .toast.success .toast-icon {
+            background: rgba(3, 218, 198, 0.16);
+            color: var(--accent);
+        }
+
+        .toast.error {
+            background: rgba(255, 92, 92, 0.08);
+            border: 1px solid rgba(255, 92, 92, 0.22);
+            color: var(--danger);
+        }
+
+        .toast.error .toast-icon {
+            background: rgba(255, 92, 92, 0.12);
+            color: var(--danger);
+        }
+
+        .toast.warning {
+            background: rgba(255, 206, 86, 0.08);
+            border: 1px solid rgba(255, 206, 86, 0.22);
+            color: #ffce56;
+        }
+
+        .toast.warning .toast-icon {
+            background: rgba(255, 206, 86, 0.12);
+            color: #ffce56;
+        }
+
+        /* Responsive reduce width on small screens */
+        @media (max-width:420px) {
+            .toast {
+                min-width: 200px;
+                max-width: 320px;
+                right: 10px;
+                left: 10px;
+            }
+
+            .toast-container {
+                right: 10px;
+                left: 10px;
+                top: 12px;
+            }
+        }
+    </style>
+</head>
+
+<body>
+    <main>
+        <!-- shared container fixes width alignment issues -->
+        <div class="container">
+            <!-- Title panel -->
+            <div class="config-header panel">
+                <div class="title-left">
+                    <div class="ext-icon" aria-hidden="true">AA</div>
+
+                    <div>
+                        <h2 class="config-title">Adobe Analytics Pageview Extension</h2>
+
+                    </div>
+                </div>
+
+                <div class="config-toggle">
+                    <span class="toggle-label">Enable on page</span>
+                    <label class="switch" title="Show analytics">
+                        <input type="checkbox" id="enableOnPageToggle" />
+                        <span class="slider"></span>
+                    </label>
+                </div>
+            </div>
+
+            <!-- Step 1 panel -->
+            <div id="step1" class="step panel">
+                <h3>Step 1: API Credentials</h3>
+
+                <label for="clientId">Client ID:
+                    <span class="info-icon"
+                        title="The OAuth Web client id recived from Adobe Developer console.">i</span>
+                </label>
+                <input type="text" id="clientId" placeholder="Enter Client ID" />
+
+                <label for="clientSecret">Client Secret:
+                    <span class="info-icon"
+                        title="The OAuth Web client secret recived from Adobe Developer console">i</span>
+                </label>
+                <input type="password" id="clientSecret" placeholder="Enter Client Secret" />
+
+                <label for="orgid">Org ID:
+                    <span class="info-icon"
+                        title="Your Adobe Org (IMS) ID. Used to fetch companies and report suites.">i</span>
+                </label>
+                <input type="text" id="orgid" placeholder="Enter Org ID" />
+
+                <label for="userpassword">Password:
+                    <span class="info-icon" title="Used to encrypt/store the token locally securely.">i</span>
+                </label>
+                <input type="text" id="userpassword" placeholder="Enter Password to secure token in local" />
+
+                <div class="btn-row">
+                    <button id="authBtn">Authenticate &amp; Save Credentials</button>
+                    <button id="clearAuthBtn" class="btn-clear">Clear Credentials</button>
+                    <button id="retrieveAccessTokenBtn" hidden>Retrieve Access Token</button>
+                </div>
+            </div>
+
+            <!-- Step 2 panel -->
+            <div id="step2" class="step panel" style="display:none;">
+                <h3>Step 2: Select Company and Report Suite</h3>
+
+                <label for="companySelect">Company:
+                    <span class="info-icon"
+                        title="Choose the company (organization) returned by Adobe APIs after authentication.">i</span>
+                </label>
+                <select id="companySelect">
+                    <option value="" disabled selected>Select company</option>
+                </select>
+
+                <label for="rsidSelect">Report Suite:
+                    <span class="info-icon"
+                        title="Report Suite list loads after you select a company. If this field is disabled, authenticate & load companies first.">i</span>
+                </label>
+                <select id="rsidSelect" disabled></select>
+
+            </div>
+
+            <!-- Step 3 panel -->
+            <div id="step3" class="step panel" style="display:none;">
+                <h3>Step 3: Page Identifier</h3>
+                <!-- Source Type -->
+                <label for="pageIdentifierSource">Identifier Source:
+                    <span class="info-icon"
+                        title="Choose the Source which you are to track Page Identifier in your Adobe Analytics Implementation.">i</span>
+                </label>
+                <select id="pageIdentifierSource">
+                    <option value="url">URL</option>
+                    <option value="title">Page Title</option>
+                    <option value="window">Window Variable</option>
+                </select>
+
+                <!-- URL Config -->
+                <div class="page-id-config" id="pageIdUrlConfig">
+                    <label for="piUrlType">URL Type</label>
+                    <select id="piUrlType">
+                        <option value="full">Full URL</option>
+                        <option value="path">Path only</option>
+                    </select>
+                    <label>
+                        <input type="checkbox" id="piRemoveQuery" checked />
+                        Remove query parameters
+                    </label>
+                    <label>
+                        <input type="checkbox" id="piRemoveHash" checked />
+                        Remove hash (#)
+                    </label>
+
+                </div>
+
+                <!-- Title Config -->
+                <div class="page-id-config" id="pageIdTitleConfig" style="display:none">
+
+                    <label>
+                        <input type="checkbox" id="piTitleTrim" checked />
+                        Trim whitespace
+                    </label>
+                    <label>
+                        <input type="checkbox" id="piTitleLowercase" />
+                        Convert to lowercase
+                    </label>
+                </div>
+
+                <!-- Window Variable Config -->
+                <div class="page-id-config" id="pageIdWindowConfig" style="display:none">
+
+                    <label for="piWindowPath">Window Variable Path</label>
+                    <input type="text" id="piWindowPath" placeholder="digitalData.page.pageInfo.pageName" />
+
+
+                </div>
+
+                <!-- Adobe Mapping -->
+                <hr />
+
+                <label for="piAdobeDimension">Adobe Dimension:
+                    <span class="info-icon"
+                        title="Specify the Adobe Analytics dimension (e.g., Page or eVar12 or prop31) where the page identifier should be mapped.">i</span>
+                </label>
+                <input type="text" id="piAdobeDimension" placeholder="Page or eVar12 or prop31" />
+
+                <label for="piAdobeMatch">Match Type:
+                    <span class="info-icon"
+                        title="Specify how the page identifier should be matched with selected Dimension.">i</span>
+                </label>
+                <select id="piAdobeMatch">
+                    <option value="exact">Exact</option>
+                    <option value="contains">Contains</option>
+                </select>
+
+                <div class="btn-row">
+                    <button id="saveConfigBtn">Save Configuration</button>
+                    <button id="clearConfigBtn" class="btn-clear">Clear Configuration</button>
+                </div>
+            </div>
+
+
+
+        </div>
+
+    </main>
+
+    <script src="options.js"></script>
+</body>
+
+</html>

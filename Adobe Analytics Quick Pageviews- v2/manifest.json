@@ -1,0 +1,33 @@
+{
+  "manifest_version": 3,
+  "name": "Adobe Analytics Quick PageViews",
+  "version": "1.1",
+  "description": "Fetch Adobe Analytics pageviews for the active pageName using OAuth Web App (user-provided client secret).",
+  "icons": {
+    "16": "icons/icon.png",
+    "48": "icons/icon.png",
+    "128": "icons/icon.png"
+  },
+  "permissions": ["storage", "identity"],
+  "host_permissions": ["https://*.adobe.io/*", "https://ims-na1.adobelogin.com/*"],
+  "background": {
+    "service_worker": "background.js"
+  },
+  "options_page": "options/aph_options.html",
+  "action": {
+    "default_title": "Adobe Analytics Quick PageViews"
+  },
+  "content_scripts": [
+    {
+      "matches": ["<all_urls>"],
+      "js": ["lib/chart.umd.min.js", "content.js"],
+      "run_at": "document_end"
+    }
+  ],
+  "web_accessible_resources": [
+    {
+      "resources": ["getPageIdentifiers.js"],
+      "matches": ["<all_urls>"]
+    }
+  ]
+}
