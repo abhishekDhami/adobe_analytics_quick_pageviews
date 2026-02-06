@@ -116,6 +116,13 @@ function getReport(pageIdentifier, reportType = "pageViews") {
         resolve(null);
         return;
       }
+
+      //Cropping value based on max length supported by Adobe Analytics for that dimension
+      if (adobeDimension === "page" || adobeDimension.includes("prop")) {
+        pageIdentifierValue = pageIdentifierValue.substring(0, 100);
+      } else if (adobeDimension.includes("evar")) {
+        pageIdentifierValue = pageIdentifierValue.substring(0, 250);
+      }
       //creating matching condition, which can be shown on widget
       let matchCondition = `${adobeDimension} ${pageIdentifierConfig.adobeDimensionConfig.match} '${pageIdentifierValue}'`;
       chrome.storage.local.set({
