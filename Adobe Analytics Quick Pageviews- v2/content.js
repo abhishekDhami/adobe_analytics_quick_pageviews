@@ -78,7 +78,7 @@ async function loadWidgetOnThePage() {
       width: 200px;
       max-width:  50vw;
       min-width: 200px;
-      max-height: 90vh;
+      max-height: 95vh;
       color: #fff;
       background: #111;
       border-left: 3px solid #75c8bb;

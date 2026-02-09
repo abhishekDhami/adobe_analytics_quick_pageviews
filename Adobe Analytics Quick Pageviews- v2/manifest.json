@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Adobe Analytics Quick PageViews",
-  "version": "1.1.2",
+  "version": "1.1.3",
   "description": "Fetch Adobe Analytics pageviews for the active pageName using OAuth Web App (user-provided client secret).",
   "icons": {
     "16": "icons/icon.png",

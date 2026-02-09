@@ -20,6 +20,33 @@ chrome.action.onClicked.addListener(() => {
   });
 });
 
+function safeAdobeTruncate(inpString, byteLimit = 100) {
+  let maxLimitReached = false;
+  try {
+    const encoder = new TextEncoder();
+    const decoder = new TextDecoder("utf-8");
+
+    // 1. Convert to UTF-8 bytes
+    const allBytes = encoder.encode(inpString);
+
+    if (allBytes.length <= byteLimit - 1) return { opStr: inpString, maxLimitReached: maxLimitReached };
+
+    // 2. Slice to the byte limit
+    const truncatedBytes = allBytes.slice(0, byteLimit);
+    if (truncatedBytes.length >= byteLimit - 1) maxLimitReached = true;
+
+    // 3. Decode back to string
+    // This will insert \uFFFD () if a multi-byte character was cut in half
+    let decodedString = decoder.decode(truncatedBytes);
+
+    // 4. Remove the corrupted replacement character if it's at the end
+    // \uFFFD is the standard 'corrupted' character Adobe shows
+    return { opStr: decodedString.replace(/\uFFFD$/g, ""), maxLimitReached: maxLimitReached };
+  } catch (err) {
+    return { opStr: "", maxLimitReached: maxLimitReached };
+  }
+}
+
 //all the actions from the content scripts
 chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   if (msg.action === "GET_TOKEN_VALIDITY") {
@@ -80,14 +107,6 @@ function getReport(pageIdentifier, reportType = "pageViews") {
       let endDate = new Date().setDate(today.getDate() + 1);
       let priorDate = new Date().setDate(today.getDate() - 6);
       let dateRangeString = `${new Date(priorDate).toISOString().split("T")[0]}T00:00:00.000/${new Date(endDate).toISOString().split("T")[0]}T00:00:00.000`;
-      let segmentMatchCondition = pageIdentifierConfig.adobeDimensionConfig.match;
-      if (segmentMatchCondition === "exact") {
-        segmentMatchCondition = "streq";
-      } else if (segmentMatchCondition === "contains") {
-        segmentMatchCondition = "contains";
-      } else {
-        segmentMatchCondition = "contains";
-      }
 
       let adobeDimension = pageIdentifierConfig.adobeDimensionConfig.dimension || "Page";
       adobeDimension = adobeDimension.toLowerCase();
@@ -113,21 +132,42 @@ function getReport(pageIdentifier, reportType = "pageViews") {
       } else if (pageIdentifierConfig.source === "window") {
         pageIdentifierValue = pageIdentifier.value;
       } else {
-        resolve(null);
+        resolve({ reportData: null, success: false });
         return;
       }
 
       //Cropping value based on max length supported by Adobe Analytics for that dimension
+      let truncationResult;
       if (adobeDimension === "page" || adobeDimension.includes("prop")) {
-        pageIdentifierValue = pageIdentifierValue.substring(0, 100);
+        truncationResult = safeAdobeTruncate(pageIdentifierValue, 100);
+        pageIdentifierValue = truncationResult.opStr;
       } else if (adobeDimension.includes("evar")) {
-        pageIdentifierValue = pageIdentifierValue.substring(0, 250);
+        truncationResult = safeAdobeTruncate(pageIdentifierValue, 250);
+        pageIdentifierValue = truncationResult.opStr;
+      }
+      if (pageIdentifierValue.length === 0) {
+        resolve({ reportData: null, success: false });
+        return;
       }
       //creating matching condition, which can be shown on widget
       let matchCondition = `${adobeDimension} ${pageIdentifierConfig.adobeDimensionConfig.match} '${pageIdentifierValue}'`;
       chrome.storage.local.set({
         pageIdentifierCondition: matchCondition,
       });
+
+      let segmentMatchCondition = pageIdentifierConfig.adobeDimensionConfig.match;
+      if (segmentMatchCondition === "exact") {
+        segmentMatchCondition = "streq";
+      } else if (segmentMatchCondition === "contains") {
+        segmentMatchCondition = "contains";
+      } else {
+        segmentMatchCondition = "contains";
+      }
+
+      //When user has selected 'exact' and pageIdentifierValue is already truncated then we will conver matching condition to 'contains' to avoid mismatch due to truncation. This is a workaround to handle cases where page URL or title exceeds Adobe's character limits and gets truncated, which would cause 'exact' match to fail.
+      if (segmentMatchCondition === "streq" && truncationResult.maxLimitReached === true) {
+        segmentMatchCondition = "contains";
+      }
 
       //Reading data from Cache first
       let cacheReadResponse = await readCache(selectedrsID, pageIdentifier.value, pageIdentifierConfig.adobeDimensionConfig.dimension, pageIdentifierConfig.adobeDimensionConfig.match, reportType);
