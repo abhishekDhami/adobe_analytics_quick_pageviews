@@ -254,6 +254,8 @@ async function loadWidgetOnThePage() {
     .info-tooltip-expanded {
       width: 200px;
       white-space: normal !important;
+      right: auto;
+      left: 0;
     }
 
     /* Minimal: show short, hide full */
