@@ -234,7 +234,8 @@ async function loadWidgetOnThePage() {
       display: none;
       position: absolute;
       top: 22px;
-      right: -8px;
+      left: 50%;
+      transform: translateX(-50%);
       background: #1a1a1a;
       border: 1px solid #333;
       border-radius: 6px;
@@ -242,11 +243,18 @@ async function loadWidgetOnThePage() {
       font-size: 11px;
       font-weight: 400;
       color: #ccc;
-      width: 220px;
+      width: 200px;
       line-height: 1.4;
       z-index: 100;
       box-shadow: 0 4px 12px rgba(0,0,0,0.5);
       white-space: normal;
+    }
+
+    /* When badge is minimal (narrow), shift tooltip left so it doesn't overflow */
+    .badge.minimal .info-tip .info-tooltip {
+      left: auto;
+      right: 0;
+      transform: none;
     }
 
     .info-tip:hover .info-tooltip {
@@ -296,6 +304,7 @@ async function loadWidgetOnThePage() {
       background: #0e0e0e;
       border-top: 1px solid #222;
       pointer-events: auto;
+      position: relative;
     }
 
     .pv-box {
@@ -472,6 +481,11 @@ async function loadWidgetOnThePage() {
       gap: 8px;
     }
 
+    .range-label {
+      font-size: 11px;
+      opacity: 0.7;
+    }
+
     /* Date preset dropdown */
     .preset-select {
       background: #1a1a1a;
@@ -541,12 +555,50 @@ async function loadWidgetOnThePage() {
 
     /* Data delay disclaimer footer */
     .delay-disclaimer {
-      font-size: 9px;
-      color: #666;
-      text-align: center;
-      padding: 4px 6px 2px;
+      display: flex;
+      justify-content: flex-end;
+      font-size: 10px;
+      color: #8a8a8a;
+      padding: 0 2px 4px;
       line-height: 1.3;
       opacity: 0.85;
+    }
+
+    /* ===== Loading overlay ===== */
+    .loading-overlay {
+      display: none;
+      position: absolute;
+      inset: 0;
+      background: rgba(14, 14, 14, 0.85);
+      z-index: 10;
+      align-items: center;
+      justify-content: center;
+      flex-direction: column;
+      gap: 10px;
+      border-radius: 0 0 0 8px;
+    }
+
+    .loading-overlay.active {
+      display: flex;
+    }
+
+    .loading-spinner {
+      width: 24px;
+      height: 24px;
+      border: 3px solid #333;
+      border-top-color: #75c8bb;
+      border-radius: 50%;
+      animation: spin 0.7s linear infinite;
+    }
+
+    .loading-text {
+      font-size: 11px;
+      color: #999;
+      letter-spacing: 0.3px;
+    }
+
+    @keyframes spin {
+      to { transform: rotate(360deg); }
     }
 
   `;
@@ -571,6 +623,12 @@ async function loadWidgetOnThePage() {
     </div>
 
     <div class="badge-body" id="badgeBody" aria-hidden="true">
+
+      <!-- Loading overlay -->
+      <div class="loading-overlay" id="loadingOverlay">
+        <div class="loading-spinner"></div>
+        <div class="loading-text">Fetching data…</div>
+      </div>
 
       <!-- ================================================= -->
       <!-- MINIMAL VIEW (Today / Yesterday / More)           -->
@@ -602,6 +660,7 @@ async function loadWidgetOnThePage() {
         <div class="expanded-header">
           <span class="expanded-title">Page Performance</span>
           <div class="expanded-right">
+            <span class="range-label">Date Range:</span>
             <select class="preset-select" id="datePresetSelect">
               <option value="7d">Last 7 Days</option>
               <option value="3w">Last 3 Weeks</option>
@@ -657,7 +716,7 @@ async function loadWidgetOnThePage() {
         </div>
 
         <div class="delay-disclaimer">
-          Data is not real-time and may have a delay of ~1 hour.
+          <span>Data is not real-time and may have a delay of ~1 hour.</span>
         </div>
 
       </div>
@@ -681,6 +740,15 @@ async function loadWidgetOnThePage() {
   const moreBtn = shadow.getElementById("moreBtn");
   const collapseBtn = shadow.getElementById("collapseBtn");
   const datePresetSelect = shadow.getElementById("datePresetSelect");
+  const loadingOverlay = shadow.getElementById("loadingOverlay");
+
+  function showLoading() {
+    if (loadingOverlay) loadingOverlay.classList.add("active");
+  }
+
+  function hideLoading() {
+    if (loadingOverlay) loadingOverlay.classList.remove("active");
+  }
 
   // Set saved preset in dropdown
   datePresetSelect.value = currentDatePreset;
@@ -702,6 +770,7 @@ async function loadWidgetOnThePage() {
     badge.classList.remove("collapsed", "expanded");
     badge.classList.add("minimal");
     body.setAttribute("aria-hidden", "false");
+    showLoading();
     setTimeout(fetchPageData, 2000);
   } else {
     toggle.checked = false;
@@ -717,7 +786,9 @@ async function loadWidgetOnThePage() {
       badge.classList.add("minimal");
       sessionStorage.setItem("adobePVExtensionToggle", "enabled");
       body.setAttribute("aria-hidden", "false");
+      showLoading();
       await fetchPageData();
+      hideLoading();
     } else {
       badge.classList.remove("minimal", "expanded");
       badge.classList.add("collapsed");
@@ -736,10 +807,12 @@ async function loadWidgetOnThePage() {
     // minimal → expanded
     badge.classList.remove("minimal");
     badge.classList.add("expanded");
+    showLoading();
     let resp = await checkToken();
-    if (!resp) return;
+    if (!resp) { hideLoading(); return; }
     const pageData = await getPageData(currentDatePreset);
     const countryData = await getCountryData(currentDatePreset);
+    hideLoading();
 
     updateChartTitles();
     renderCharts(pageData, countryData);
@@ -760,17 +833,20 @@ async function loadWidgetOnThePage() {
     await saveDatePreset(currentDatePreset);
 
     // Re-fetch expanded view data with new preset
-    statusEl.textContent = "Fetching Data...";
+    showLoading();
+    statusEl.textContent = "";
     let resp = await checkToken();
-    if (!resp) return;
+    if (!resp) { hideLoading(); return; }
 
     const pageData = await getPageData(currentDatePreset);
     const countryData = await getCountryData(currentDatePreset);
 
     if (!pageData || !countryData) {
+      hideLoading();
       statusEl.textContent = "No data available for this page.";
       return;
     }
+    hideLoading();
     statusEl.textContent = "";
 
     // Update summary metrics from new preset data
@@ -920,16 +996,20 @@ async function loadWidgetOnThePage() {
   async function updateWidgetWithPageData() {
     let resp = await checkToken();
     if (!resp) return;
-    statusEl.textContent = "Fetching Data...";
+    showLoading();
+    statusEl.textContent = "";
 
     // Minimal view always uses "7d" preset for today/yesterday
     const [pageData, countryData] = await Promise.all([getPageData("7d"), getCountryData("7d")]);
     if (!pageData || !countryData) {
+      hideLoading();
       statusEl.textContent = "No data available for this page.";
       return;
     }
+    hideLoading();
     statusEl.textContent = "";
     renderMetrics(pageData);
+    updateFilterCondition();
     return;
   }
   window.updateWidgetWithPageData = updateWidgetWithPageData;
@@ -946,8 +1026,10 @@ async function loadWidgetOnThePage() {
 
       // If expanded view is active, also refresh charts
       if (badge.classList.contains("expanded")) {
+        showLoading();
         const pageData = await getPageData(currentDatePreset);
         const countryData = await getCountryData(currentDatePreset);
+        hideLoading();
         if (pageData && countryData) {
           renderMetrics(pageData);
           renderCharts(pageData, countryData);
