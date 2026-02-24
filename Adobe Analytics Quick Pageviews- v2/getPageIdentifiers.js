@@ -1,4 +1,9 @@
-// inject.js
+// getPageIdentifiers.js — Injected into the PAGE context (not content script)
+// This file has access to window.s, window.alloy, window._satellite etc.
+
+// =====================
+// Page Identifier Fetch
+// =====================
 window.addEventListener("fetchPageWindowPathIdentifiers", (e) => {
   function getValueByPath(obj, path) {
     return path.split(".").reduce((o, k) => o?.[k], obj);
@@ -13,6 +18,9 @@ window.addEventListener("fetchPageWindowPathIdentifiers", (e) => {
   );
 });
 
+// =====================
+// Adobe Analytics Detection
+// =====================
 window.addEventListener("isAdobeAnalyticsImplemented", () => {
   let adobeAnalyticsImplemented = false;
   if (
@@ -27,3 +35,46 @@ window.addEventListener("isAdobeAnalyticsImplemented", () => {
   }
   window.dispatchEvent(new CustomEvent("isAdobeAnalyticsImplementedResponse", { detail: { adobeAnalyticsImplemented } }));
 });
+
+// =====================
+// SPA Navigation Detection
+// =====================
+// Monkey-patch History API to detect SPA navigations
+// This runs in the page context so it can intercept framework-level navigation
+(function () {
+  let lastUrl = location.href;
+
+  function notifyNavigation() {
+    const newUrl = location.href;
+    if (newUrl !== lastUrl) {
+      lastUrl = newUrl;
+      window.dispatchEvent(new CustomEvent("spaNavigationDetected", { detail: { url: newUrl } }));
+    }
+  }
+
+  // Patch pushState
+  const originalPushState = history.pushState;
+  history.pushState = function () {
+    originalPushState.apply(this, arguments);
+    notifyNavigation();
+  };
+
+  // Patch replaceState
+  const originalReplaceState = history.replaceState;
+  history.replaceState = function () {
+    originalReplaceState.apply(this, arguments);
+    notifyNavigation();
+  };
+
+  // Listen for popstate (browser back/forward)
+  window.addEventListener("popstate", () => {
+    // Small delay to let the URL update
+    setTimeout(notifyNavigation, 50);
+  });
+
+  // Fallback: URL polling for edge cases (hashchange, exotic frameworks)
+  // Checks every 2 seconds — lightweight since it's just a string comparison
+  setInterval(() => {
+    notifyNavigation();
+  }, 2000);
+})();

@@ -8,6 +8,57 @@ const SESSION_TIMEOUT_MS = 4 * 60 * 60 * 1000; // 4 hours
 const WRAPPED_KEY_STORAGE = "wrappedSessionKey";
 const DERIVED_KEY_SESSION = "derivedKeyCache";
 
+// =====================
+// Date Preset Helpers
+// =====================
+const DATE_PRESETS = {
+  "7d": { label: "Last 7 Days", days: 7, granularity: "day", dimension: "variables/daterangeday" },
+  "3w": { label: "Last 3 Weeks", weeks: 3, granularity: "week", dimension: "variables/daterangeweek" },
+  "5w": { label: "Last 5 Weeks", weeks: 5, granularity: "week", dimension: "variables/daterangeweek" },
+};
+
+function getDateRangeForPreset(presetKey) {
+  const preset = DATE_PRESETS[presetKey] || DATE_PRESETS["7d"];
+  const today = new Date();
+  let startDate, endDate, limit;
+
+  if (preset.granularity === "day") {
+    // Last N days: from (today - N+1) to (today + 1) to include today
+    endDate = new Date(today);
+    endDate.setDate(today.getDate() + 1);
+    startDate = new Date(today);
+    startDate.setDate(today.getDate() - (preset.days - 1));
+    limit = preset.days;
+  } else if (preset.granularity === "week") {
+    // For weekly: go back N full ISO weeks from the current week
+    // Find start of current ISO week (Monday)
+    const dayOfWeek = today.getDay(); // 0=Sun, 1=Mon...
+    const mondayOffset = dayOfWeek === 0 ? -6 : 1 - dayOfWeek;
+    const currentWeekMonday = new Date(today);
+    currentWeekMonday.setDate(today.getDate() + mondayOffset);
+
+    // End date is next Monday (to include current week in the range)
+    endDate = new Date(currentWeekMonday);
+    endDate.setDate(currentWeekMonday.getDate() + 7);
+
+    // Start date is N weeks before current week Monday
+    startDate = new Date(currentWeekMonday);
+    startDate.setDate(currentWeekMonday.getDate() - (preset.weeks - 1) * 7);
+    limit = preset.weeks;
+  }
+
+  const formatDate = (d) => d.toISOString().split("T")[0];
+  const dateRangeString = `${formatDate(startDate)}T00:00:00.000/${formatDate(endDate)}T00:00:00.000`;
+
+  return {
+    dateRangeString,
+    dimension: preset.dimension,
+    granularity: preset.granularity,
+    limit,
+    label: preset.label,
+  };
+}
+
 // Listen for extension icon click to open options page
 chrome.action.onClicked.addListener(() => {
   chrome.tabs.query({}, (tabs) => {
@@ -36,11 +87,9 @@ function safeAdobeTruncate(inpString, byteLimit = 100) {
     if (truncatedBytes.length >= byteLimit - 1) maxLimitReached = true;
 
     // 3. Decode back to string
-    // This will insert \uFFFD () if a multi-byte character was cut in half
     let decodedString = decoder.decode(truncatedBytes);
 
     // 4. Remove the corrupted replacement character if it's at the end
-    // \uFFFD is the standard 'corrupted' character Adobe shows
     return { opStr: decodedString.replace(/\uFFFD$/g, ""), maxLimitReached: maxLimitReached };
   } catch (err) {
     return { opStr: "", maxLimitReached: maxLimitReached };
@@ -53,7 +102,7 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     getValidAccessToken().then((resp) => {
       sendResponse(resp);
     });
-    return true; // Indicate async response
+    return true;
   } else if (msg.action === "OPEN_EXTENSION_OPTION") {
     chrome.runtime.openOptionsPage();
     chrome.runtime.sendMessage({ type: "RECHECK_TOKEN_STATUS" }, (res) => {
@@ -78,15 +127,19 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       }
     });
   } else if (msg.action === "GET_REPORT") {
-    // sendResponse({ received: true });
-    getReport(msg.pageIdentifier, msg.reportType).then((reportData) => {
+    getReport(msg.pageIdentifier, msg.reportType, msg.datePreset).then((reportData) => {
       sendResponse(reportData);
     });
     return true;
+  } else if (msg.action === "GET_DATE_PRESET") {
+    chrome.storage.local.get(["datePreset"], (result) => {
+      sendResponse({ datePreset: result.datePreset || "7d" });
+    });
+  } else if (msg.action === "SET_DATE_PRESET") {
+    chrome.storage.local.set({ datePreset: msg.datePreset }, () => {
+      sendResponse({ success: true });
+    });
   }
-  // else if (msg.action === "KEEP_ALIVE") {
-  //   sendResponse({ alive: true });
-  // }
   return true;
 });
 
@@ -96,17 +149,16 @@ async function getEnableOnPageFlag() {
   return enableOnPage;
 }
 
-function getReport(pageIdentifier, reportType = "pageViews") {
+function getReport(pageIdentifier, reportType = "pageViews", datePreset = "7d") {
   return new Promise(async (resolve, reject) => {
     try {
       const { client_id, selectedCompanyID, selectedrsID, pageIdentifierConfig } = await chrome.storage.local.get(["client_id", "selectedCompanyID", "selectedrsID", "pageIdentifierConfig"]);
 
       if (pageIdentifier == undefined) resolve(null);
 
-      let today = new Date();
-      let endDate = new Date().setDate(today.getDate() + 1);
-      let priorDate = new Date().setDate(today.getDate() - 6);
-      let dateRangeString = `${new Date(priorDate).toISOString().split("T")[0]}T00:00:00.000/${new Date(endDate).toISOString().split("T")[0]}T00:00:00.000`;
+      // Use preset for date range and granularity
+      const presetConfig = getDateRangeForPreset(datePreset);
+      let dateRangeString = presetConfig.dateRangeString;
 
       let adobeDimension = pageIdentifierConfig.adobeDimensionConfig.dimension || "Page";
       adobeDimension = adobeDimension.toLowerCase();
@@ -164,13 +216,13 @@ function getReport(pageIdentifier, reportType = "pageViews") {
         segmentMatchCondition = "contains";
       }
 
-      //When user has selected 'exact' and pageIdentifierValue is already truncated then we will conver matching condition to 'contains' to avoid mismatch due to truncation. This is a workaround to handle cases where page URL or title exceeds Adobe's character limits and gets truncated, which would cause 'exact' match to fail.
+      //When user has selected 'exact' and pageIdentifierValue is already truncated then we will convert matching condition to 'contains'
       if (segmentMatchCondition === "streq" && truncationResult.maxLimitReached === true) {
         segmentMatchCondition = "contains";
       }
 
-      //Reading data from Cache first
-      let cacheReadResponse = await readCache(selectedrsID, pageIdentifier.value, pageIdentifierConfig.adobeDimensionConfig.dimension, pageIdentifierConfig.adobeDimensionConfig.match, reportType);
+      //Reading data from Cache first — include datePreset in cache key
+      let cacheReadResponse = await readCache(selectedrsID, pageIdentifier.value, pageIdentifierConfig.adobeDimensionConfig.dimension, pageIdentifierConfig.adobeDimensionConfig.match, reportType, datePreset);
       if (cacheReadResponse.data != null && cacheReadResponse.hit === true) {
         resolve({ reportData: cacheReadResponse.data, success: true, fromCache: true });
         return;
@@ -206,9 +258,10 @@ function getReport(pageIdentifier, reportType = "pageViews") {
             columnId: "2",
           },
         ];
-        rowDimension = "variables/daterangeday";
+        // Use dimension from preset (daterangeday or daterangeweek)
+        rowDimension = presetConfig.dimension;
         customSettings = {
-          limit: 7,
+          limit: presetConfig.limit,
           dimensionSort: "asc",
         };
       }
@@ -277,7 +330,7 @@ function getReport(pageIdentifier, reportType = "pageViews") {
       if (rows && rows.length > 0) {
         let data = null;
         if (reportType === "pageViews") {
-          data = { dates: [], pageViews: [], visits: [], visitors: [], filteredTotals: [] };
+          data = { dates: [], pageViews: [], visits: [], visitors: [], filteredTotals: [], granularity: presetConfig.granularity };
           rows.forEach((row) => {
             data.dates.push(row.value);
             data.pageViews.push(row.data[0]);
@@ -296,7 +349,7 @@ function getReport(pageIdentifier, reportType = "pageViews") {
             data.pageViews.push(prctContribution);
           });
         }
-        saveCache(selectedrsID, pageIdentifier.value, pageIdentifierConfig.adobeDimensionConfig.dimension, pageIdentifierConfig.adobeDimensionConfig.match, reportType, data);
+        saveCache(selectedrsID, pageIdentifier.value, pageIdentifierConfig.adobeDimensionConfig.dimension, pageIdentifierConfig.adobeDimensionConfig.match, reportType, datePreset, data);
         resolve({ reportData: data, success: true, fromCache: false });
         cleanupExpiredCache();
       } else {
@@ -310,10 +363,10 @@ function getReport(pageIdentifier, reportType = "pageViews") {
   });
 }
 
-function readCache(rsid, pageIdentifierValue, pageIdentifierDimension, pageIdentifierMatchType, reportType) {
+function readCache(rsid, pageIdentifierValue, pageIdentifierDimension, pageIdentifierMatchType, reportType, datePreset = "7d") {
   return new Promise(async (resolve, reject) => {
     try {
-      let cacheKey = `CACHE||${rsid}||${pageIdentifierDimension}||${pageIdentifierMatchType}||${pageIdentifierValue}||${reportType}`;
+      let cacheKey = `CACHE||${rsid}||${pageIdentifierDimension}||${pageIdentifierMatchType}||${pageIdentifierValue}||${reportType}||${datePreset}`;
 
       let pattern = /[^a-zA-Z0-9|\s]/g;
       cacheKey = cacheKey.replace(pattern, "");
@@ -338,15 +391,16 @@ function readCache(rsid, pageIdentifierValue, pageIdentifierDimension, pageIdent
   });
 }
 
-async function saveCache(rsid, pageIdentifierValue, pageIdentifierDimension, pageIdentifierMatchType, reportType, reportData) {
+async function saveCache(rsid, pageIdentifierValue, pageIdentifierDimension, pageIdentifierMatchType, reportType, datePreset = "7d", reportData) {
   return new Promise(async (resolve, reject) => {
     try {
-      let cacheKey = `CACHE||${rsid}||${pageIdentifierDimension}||${pageIdentifierMatchType}||${pageIdentifierValue}||${reportType}`;
+      let cacheKey = `CACHE||${rsid}||${pageIdentifierDimension}||${pageIdentifierMatchType}||${pageIdentifierValue}||${reportType}||${datePreset}`;
 
       let pattern = /[^a-zA-Z0-9|\s]/g;
       cacheKey = cacheKey.replace(pattern, "");
       let ttl = new Date().getTime() + 15 * 60 * 1000; //15 minutes TTL
       await chrome.storage.local.set({ [cacheKey]: { data: reportData, ttl } });
+      resolve({ success: true });
     } catch (err) {
       resolve({ error: "Error saving to cache.", data: null });
     }
@@ -401,7 +455,6 @@ chrome.runtime.onMessage.addListener(async (msg, sender, sendResponse) => {
       sendResponse(resp);
       break;
     case "GET_KEY_STATUS":
-      // Allow options page to check if key exists
       let hasKey = sessionKey !== null ? true : false;
       sendResponse({ hasKey: hasKey });
       break;
@@ -454,14 +507,6 @@ chrome.runtime.onMessage.addListener(async (msg, sender, sendResponse) => {
           let expires_at = Date.now() + (tokenData.expires_in || 3600) * 1000;
 
           await encryptAndStoreCredentials(userpassword, tokenData.access_token, tokenData.refresh_token, client_id, client_secret, org_id, expires_at);
-          // await chrome.storage.local.set({
-          //   client_id,
-          //   client_secret,
-          //   org_id,
-          //   accessToken: tokenData.access_token,
-          //   refreshToken: tokenData.refresh_token,
-          //   expires_at,
-          // });
           let companyDataResponse = await fetchCompaniesAndSuites();
           if (companyDataResponse.success) {
             sendResponse({ success: true, companiesData: companyDataResponse.data });
@@ -692,7 +737,7 @@ async function decryptData(encryptedBase64, key) {
 async function encryptAndStoreCredentials(password, accessToken, refreshToken, client_id, client_secret, org_id, expires_at) {
   const { key: derivedKey, saltBase64 } = await deriveKeyFromPassword(password);
 
-  // NEW → create random session key
+  // create random session key
   const newSessionKey = await generateSessionKey();
 
   // wrap session key
@@ -769,7 +814,7 @@ async function decryptStoredCredentials(key) {
 }
 
 // --------------------------------------
-// 🔐 Session Key Wrapping Helpers (NEW)
+// 🔐 Session Key Wrapping Helpers
 // --------------------------------------
 
 async function generateSessionKey() {
@@ -781,7 +826,6 @@ async function wrapSessionKey(sessionKey, derivedKey) {
 
   const wrapped = await crypto.subtle.wrapKey("raw", sessionKey, derivedKey, { name: "AES-GCM", iv });
 
-  // prepend IV like you do in encryptData()
   const combined = new Uint8Array(iv.length + wrapped.byteLength);
   combined.set(iv, 0);
   combined.set(new Uint8Array(wrapped), iv.length);

@@ -4,6 +4,9 @@ let adobeAnalyticsImplemented = null;
 let extCustomTimerID = null;
 let pageIdentifier = {};
 let chartInstances = {};
+let currentDatePreset = "7d"; // default preset
+let spaDebounceTimer = null;
+const SPA_DEBOUNCE_MS = 1500; // debounce SPA navigation re-fetches
 
 function inInitCharts() {
   Chart.defaults.color = "#ddd";
@@ -24,6 +27,10 @@ window.addEventListener("load", async () => {
   // ---------- Checking if widget is enable ----------
   const isWidgetEnabled = await getEnableOnPageFlag();
   if (isWidgetEnabled == false) return;
+
+  // Load saved date preset
+  currentDatePreset = await getSavedDatePreset();
+
   //Get page identifiers from injected script
   await delay(1); // wait for 1 second to get the identifiers
   window.dispatchEvent(new CustomEvent("isAdobeAnalyticsImplemented"));
@@ -41,9 +48,64 @@ window.addEventListener("pageIdentifierWindowPathValue", async (e) => {
   await window.updateWidgetWithPageData();
 });
 
+// =====================
+// SPA Navigation Handler
+// =====================
+window.addEventListener("spaNavigationDetected", (e) => {
+  // Debounce rapid navigations
+  if (spaDebounceTimer) clearTimeout(spaDebounceTimer);
+  spaDebounceTimer = setTimeout(() => {
+    handleSpaNavigation();
+  }, SPA_DEBOUNCE_MS);
+});
+
+async function handleSpaNavigation() {
+  // Only proceed if widget is loaded and enabled
+  if (!document.getElementById("aa-extension-root")) return;
+  if (!adobeAnalyticsImplemented) return;
+
+  // Re-fetch page identifiers and update widget
+  if (typeof window.refetchPageDataForSpa === "function") {
+    await window.refetchPageDataForSpa();
+  }
+}
+
 function delay(seconds) {
   return new Promise((resolve) => setTimeout(resolve, seconds * 1000));
 }
+
+// =====================
+// Date Preset Helpers
+// =====================
+function getSavedDatePreset() {
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage({ action: "GET_DATE_PRESET" }, (response) => {
+      if (chrome.runtime.lastError) {
+        resolve("7d");
+        return;
+      }
+      resolve(response?.datePreset || "7d");
+    });
+  });
+}
+
+function saveDatePreset(preset) {
+  return new Promise((resolve) => {
+    chrome.runtime.sendMessage({ action: "SET_DATE_PRESET", datePreset: preset }, (response) => {
+      if (chrome.runtime.lastError) {
+        resolve();
+        return;
+      }
+      resolve();
+    });
+  });
+}
+
+const DATE_PRESET_LABELS = {
+  "7d": "Last 7 Days",
+  "3w": "Last 3 Weeks",
+  "5w": "Last 5 Weeks",
+};
 
 async function loadWidgetOnThePage() {
   //load widget only if Adobe Analytics is implemented on the page
@@ -97,8 +159,6 @@ async function loadWidgetOnThePage() {
       flex-direction: column;
     }
 
-    
-
     /* header only */
     .badge.collapsed .badge-body {
       display: none;
@@ -113,7 +173,7 @@ async function loadWidgetOnThePage() {
     /* small (today/yesterday) */
     .badge.minimal .badge-body {
       display: flex;
-      flex-direction: column;   /* ✅ stack vertically */
+      flex-direction: column;
       gap: 8px;
       justify-content: flex-start; 
     }
@@ -136,7 +196,7 @@ async function loadWidgetOnThePage() {
     .badge-title {
       display:flex;
       align-items:center;
-      gap:8px;
+      gap:6px;
       font-size:13px;
       font-weight:600;
       color: #ffffff;
@@ -150,6 +210,47 @@ async function loadWidgetOnThePage() {
       padding:2px 6px;
       border-radius:4px;
       font-weight:700;
+    }
+
+    /* Info icon for data delay disclaimer */
+    .info-tip {
+      display: inline-flex;
+      align-items: center;
+      justify-content: center;
+      width: 15px;
+      height: 15px;
+      border-radius: 50%;
+      font-size: 9px;
+      font-weight: 700;
+      color: #999;
+      background: rgba(255,255,255,0.08);
+      border: 1px solid rgba(255,255,255,0.12);
+      cursor: help;
+      position: relative;
+      flex-shrink: 0;
+    }
+
+    .info-tip .info-tooltip {
+      display: none;
+      position: absolute;
+      top: 22px;
+      right: -8px;
+      background: #1a1a1a;
+      border: 1px solid #333;
+      border-radius: 6px;
+      padding: 8px 10px;
+      font-size: 11px;
+      font-weight: 400;
+      color: #ccc;
+      width: 220px;
+      line-height: 1.4;
+      z-index: 100;
+      box-shadow: 0 4px 12px rgba(0,0,0,0.5);
+      white-space: normal;
+    }
+
+    .info-tip:hover .info-tooltip {
+      display: block;
     }
 
     .toggle-wrap {
@@ -371,9 +472,29 @@ async function loadWidgetOnThePage() {
       gap: 8px;
     }
 
-    .range-label {
+    /* Date preset dropdown */
+    .preset-select {
+      background: #1a1a1a;
+      color: #ccc;
+      border: 1px solid #333;
+      border-radius: 4px;
+      padding: 2px 6px;
       font-size: 11px;
-      opacity: 0.7;
+      font-family: Arial, Helvetica, sans-serif;
+      cursor: pointer;
+      outline: none;
+      transition: border-color 0.15s;
+    }
+
+    .preset-select:hover,
+    .preset-select:focus {
+      border-color: #75c8bb;
+      color: #fff;
+    }
+
+    .preset-select option {
+      background: #1a1a1a;
+      color: #ccc;
     }
 
     .collapse-btn {
@@ -406,7 +527,7 @@ async function loadWidgetOnThePage() {
       font-size: 10px;
       color: #8a8a8a;
       margin-top: 4px;
-      margin-bottom: 6px;
+      margin-bottom: 2px;
       padding-right: 2px;
       opacity: 0.85;
     }
@@ -418,6 +539,16 @@ async function loadWidgetOnThePage() {
       max-width: 95%;
     }
 
+    /* Data delay disclaimer footer */
+    .delay-disclaimer {
+      font-size: 9px;
+      color: #666;
+      text-align: center;
+      padding: 4px 6px 2px;
+      line-height: 1.3;
+      opacity: 0.85;
+    }
+
   `;
   shadow.appendChild(style);
   // ---------- HTML ----------
@@ -426,8 +557,10 @@ async function loadWidgetOnThePage() {
   badge.innerHTML = `
     <div class="badge-header draggable" id="badgeHeader">
       <div class="badge-title">
-       <!-- <span class="badge-ident">Extension</span> -->
         <span>Adobe Analytics Pageviews</span>
+        <span class="info-tip" id="headerInfoTip">i
+          <span class="info-tooltip">Data shown is not real-time and may have a delay of approximately 1 hour. Metrics reflect the latest available Adobe Analytics Workspace data.</span>
+        </span>
       </div>
       <div class="toggle-wrap">
         <label class="switch" title="Show analytics">
@@ -469,7 +602,11 @@ async function loadWidgetOnThePage() {
         <div class="expanded-header">
           <span class="expanded-title">Page Performance</span>
           <div class="expanded-right">
-            <span class="range-label">Last 7 Days</span>
+            <select class="preset-select" id="datePresetSelect">
+              <option value="7d">Last 7 Days</option>
+              <option value="3w">Last 3 Weeks</option>
+              <option value="5w">Last 5 Weeks</option>
+            </select>
             <button id="collapseBtn" class="collapse-btn">✕</button>
           </div>
         </div>
@@ -495,17 +632,17 @@ async function loadWidgetOnThePage() {
         <!-- ===== CHARTS ===== -->
         <div class="charts-grid">
           <div class="chart-card">
-            <div class="chart-title">Pageviews (7d)</div>
+            <div class="chart-title" id="pvChartTitle">Pageviews (7d)</div>
             <div class="chart-box"><canvas id="pvChart"></canvas></div>
           </div>
 
           <div class="chart-card">
-            <div class="chart-title">Visits (7d)</div>
+            <div class="chart-title" id="visitsChartTitle">Visits (7d)</div>
             <div class="chart-box"><canvas id="visitsChart"></canvas></div>
           </div>
 
           <div class="chart-card">
-            <div class="chart-title">Visitors (7d)</div>
+            <div class="chart-title" id="uvChartTitle">Visitors (7d)</div>
             <div class="chart-box"><canvas id="uvChart"></canvas></div>
           </div>
 
@@ -517,6 +654,10 @@ async function loadWidgetOnThePage() {
 
         <div class="filter-footer">
           <span id="filterCondition"></span>
+        </div>
+
+        <div class="delay-disclaimer">
+          Data is not real-time and may have a delay of ~1 hour.
         </div>
 
       </div>
@@ -539,6 +680,10 @@ async function loadWidgetOnThePage() {
   const reauthBtn = shadow.getElementById("reauthenticateBtn");
   const moreBtn = shadow.getElementById("moreBtn");
   const collapseBtn = shadow.getElementById("collapseBtn");
+  const datePresetSelect = shadow.getElementById("datePresetSelect");
+
+  // Set saved preset in dropdown
+  datePresetSelect.value = currentDatePreset;
 
   //If badge position saved in sessionStorage, apply it
   const savedLeft = sessionStorage.getItem("badgeLeftPosition");
@@ -591,14 +736,12 @@ async function loadWidgetOnThePage() {
     // minimal → expanded
     badge.classList.remove("minimal");
     badge.classList.add("expanded");
-    // wait until DOM is visible
-    // await new Promise((r) => setTimeout(r, 2000));
-    // await new Promise((r) => requestAnimationFrame(() => requestAnimationFrame(r)));
     let resp = await checkToken();
     if (!resp) return;
-    const pageData = await getPageData();
-    const countryData = await getCountryData();
+    const pageData = await getPageData(currentDatePreset);
+    const countryData = await getCountryData(currentDatePreset);
 
+    updateChartTitles();
     renderCharts(pageData, countryData);
     updateFilterCondition();
   });
@@ -611,6 +754,32 @@ async function loadWidgetOnThePage() {
     chartInstances = {};
   });
 
+  /* ---------- Date Preset Change ---------- */
+  datePresetSelect.addEventListener("change", async (e) => {
+    currentDatePreset = e.target.value;
+    await saveDatePreset(currentDatePreset);
+
+    // Re-fetch expanded view data with new preset
+    statusEl.textContent = "Fetching Data...";
+    let resp = await checkToken();
+    if (!resp) return;
+
+    const pageData = await getPageData(currentDatePreset);
+    const countryData = await getCountryData(currentDatePreset);
+
+    if (!pageData || !countryData) {
+      statusEl.textContent = "No data available for this page.";
+      return;
+    }
+    statusEl.textContent = "";
+
+    // Update summary metrics from new preset data
+    renderMetrics(pageData);
+    updateChartTitles();
+    renderCharts(pageData, countryData);
+    updateFilterCondition();
+  });
+
   // ---------- dragging (mouse + touch) ----------
   let dragging = false;
   let dragOffsetX = 0;
@@ -619,11 +788,9 @@ async function loadWidgetOnThePage() {
   const startDrag = (clientX, clientY) => {
     dragging = true;
     badge.classList.add("dragging");
-    // compute offset relative to top-left of badge
     const rect = badge.getBoundingClientRect();
     dragOffsetX = clientX - rect.left;
     dragOffsetY = clientY - rect.top;
-    // switch to absolute positioning if not already
     badge.style.left = rect.left + "px";
     badge.style.top = rect.top + "px";
     badge.style.right = "auto";
@@ -634,8 +801,7 @@ async function loadWidgetOnThePage() {
     if (!dragging) return;
     const newLeft = clientX - dragOffsetX;
     const newTop = clientY - dragOffsetY;
-    // clamp so it stays visible
-    const maxLeft = window.innerWidth - 40; // minimal allowance
+    const maxLeft = window.innerWidth - 40;
     const maxTop = window.innerHeight - 40;
     badge.style.left = Math.min(Math.max(0, newLeft), maxLeft) + "px";
     badge.style.top = Math.min(Math.max(0, newTop), maxTop) + "px";
@@ -650,7 +816,6 @@ async function loadWidgetOnThePage() {
 
   // mouse events
   header.addEventListener("mousedown", (ev) => {
-    // don't start drag if clicking the toggle itself
     if (ev.target.closest("label.switch")) return;
     ev.preventDefault();
     startDrag(ev.clientX, ev.clientY);
@@ -717,14 +882,14 @@ async function loadWidgetOnThePage() {
   }
 
   async function fetchPageData() {
-    let pageIdentifier = await fetchPageIdentifiers();
-    if (pageIdentifier.success === false) {
+    let pageIdentifierResp = await fetchPageIdentifiers();
+    if (pageIdentifierResp.success === false) {
       //Try again after 2 seconds
       setTimeout(() => {
         fetchPageData();
       }, 2000);
       return;
-    } else if (pageIdentifier?.success === true) {
+    } else if (pageIdentifierResp?.success === true) {
       await updateWidgetWithPageData();
     }
   }
@@ -751,11 +916,14 @@ async function loadWidgetOnThePage() {
       });
     });
   }
+
   async function updateWidgetWithPageData() {
     let resp = await checkToken();
     if (!resp) return;
     statusEl.textContent = "Fetching Data...";
-    const [pageData, countryData] = await Promise.all([getPageData(), getCountryData()]);
+
+    // Minimal view always uses "7d" preset for today/yesterday
+    const [pageData, countryData] = await Promise.all([getPageData("7d"), getCountryData("7d")]);
     if (!pageData || !countryData) {
       statusEl.textContent = "No data available for this page.";
       return;
@@ -765,6 +933,31 @@ async function loadWidgetOnThePage() {
     return;
   }
   window.updateWidgetWithPageData = updateWidgetWithPageData;
+
+  // =====================
+  // SPA Re-fetch Handler
+  // =====================
+  async function refetchPageDataForSpa() {
+    // Re-read page identifier based on current source
+    let pageIdentifierResp = await fetchPageIdentifiers();
+    if (pageIdentifierResp.success === true) {
+      // For url/title sources, update immediately
+      await updateWidgetWithPageData();
+
+      // If expanded view is active, also refresh charts
+      if (badge.classList.contains("expanded")) {
+        const pageData = await getPageData(currentDatePreset);
+        const countryData = await getCountryData(currentDatePreset);
+        if (pageData && countryData) {
+          renderMetrics(pageData);
+          renderCharts(pageData, countryData);
+          updateFilterCondition();
+        }
+      }
+    }
+    // For 'window' source, the pageIdentifierWindowPathValue event listener handles the update
+  }
+  window.refetchPageDataForSpa = refetchPageDataForSpa;
 
   function renderMetrics(pageData) {
     if (!pageData) return;
@@ -790,17 +983,48 @@ async function loadWidgetOnThePage() {
     yesterdayEl.textContent = yesterdayPV.toLocaleString();
   }
 
-  function createVerticalChart(canvas, labels, values) {
+  function updateChartTitles() {
+    const presetLabel = DATE_PRESET_LABELS[currentDatePreset] || "Last 7 Days";
+    const shortLabel = currentDatePreset === "7d" ? "7d" : currentDatePreset === "3w" ? "3w" : "5w";
+    const pvTitle = badge.querySelector("#pvChartTitle");
+    const visitsTitle = badge.querySelector("#visitsChartTitle");
+    const uvTitle = badge.querySelector("#uvChartTitle");
+    if (pvTitle) pvTitle.textContent = `Pageviews (${shortLabel})`;
+    if (visitsTitle) visitsTitle.textContent = `Visits (${shortLabel})`;
+    if (uvTitle) uvTitle.textContent = `Visitors (${shortLabel})`;
+  }
+
+  function formatChartLabel(rawLabel, granularity) {
+    // For daily: "Jan 15, 2025" → "Jan 15"
+    // For weekly: "Jan 13, 2025 ~ Jan 19, 2025" → "Jan 13-19"
+    if (granularity === "week") {
+      // Adobe returns week ranges like "Jan 13, 2025 ~ Jan 19, 2025"
+      const parts = rawLabel.split("~").map((s) => s.trim());
+      if (parts.length === 2) {
+        const startParts = parts[0].split(",")[0].trim(); // "Jan 13"
+        const endDate = parts[1].split(",")[0].trim().split(" "); // ["Jan", "19"]
+        const endDay = endDate[endDate.length - 1]; // "19"
+        return `${startParts}-${endDay}`;
+      }
+      return rawLabel.split(",")[0];
+    }
+    // Daily: just remove the year
+    return rawLabel.split(",")[0];
+  }
+
+  function createVerticalChart(canvas, labels, values, granularity) {
     if (!canvas) return;
     const ctx = canvas.getContext("2d");
     if (chartInstances[canvas.id]) {
       chartInstances[canvas.id].destroy();
     }
 
+    const formattedLabels = labels.map((l) => formatChartLabel(l, granularity));
+
     chartInstances[canvas.id] = new Chart(ctx, {
       type: "bar",
       data: {
-        labels,
+        labels: formattedLabels,
         datasets: [
           {
             data: values,
@@ -825,7 +1049,6 @@ async function loadWidgetOnThePage() {
           },
         },
 
-        // Disable all interactions
         interaction: {
           mode: "index",
         },
@@ -846,10 +1069,12 @@ async function loadWidgetOnThePage() {
             displayColors: false,
             callbacks: {
               title: function (context) {
-                return context[0].label;
+                // Show the original full label in tooltip
+                const idx = context[0].dataIndex;
+                return labels[idx] || context[0].label;
               },
               label: function (context) {
-                return context.parsed.y;
+                return context.parsed.y.toLocaleString();
               },
             },
           },
@@ -907,7 +1132,7 @@ async function loadWidgetOnThePage() {
         ],
       },
       options: {
-        indexAxis: "y", // THIS MAKES IT HORIZONTAL!
+        indexAxis: "y",
         responsive: true,
         maintainAspectRatio: false,
 
@@ -920,7 +1145,6 @@ async function loadWidgetOnThePage() {
           },
         },
 
-        // Disable all interactions
         interaction: {
           mode: "index",
         },
@@ -984,12 +1208,13 @@ async function loadWidgetOnThePage() {
     if (!pageData || !countryData) return;
 
     const root = badge;
+    const granularity = pageData.granularity || "day";
 
-    createVerticalChart(root.querySelector("#pvChart"), pageData.dates, pageData.pageViews);
+    createVerticalChart(root.querySelector("#pvChart"), pageData.dates, pageData.pageViews, granularity);
 
-    createVerticalChart(root.querySelector("#visitsChart"), pageData.dates, pageData.visits);
+    createVerticalChart(root.querySelector("#visitsChart"), pageData.dates, pageData.visits, granularity);
 
-    createVerticalChart(root.querySelector("#uvChart"), pageData.dates, pageData.visitors);
+    createVerticalChart(root.querySelector("#uvChart"), pageData.dates, pageData.visitors, granularity);
 
     createHorizontalChart(root.querySelector("#countryChart"), countryData.countries, countryData.pageViews);
   }
@@ -1006,14 +1231,13 @@ async function loadWidgetOnThePage() {
     }
 
     el.textContent = `Filter: ${pageIdentifierCondition}`;
-    el.title = pageIdentifierCondition; // tooltip if long
+    el.title = pageIdentifierCondition;
   }
 }
 
-function getPageData() {
+function getPageData(datePreset = "7d") {
   return new Promise((resolve, reject) => {
-    chrome.runtime.sendMessage({ action: "GET_REPORT", pageIdentifier: pageIdentifier, reportType: "pageViews" }, (response) => {
-      console.log("EX] Page Data Response:", response);
+    chrome.runtime.sendMessage({ action: "GET_REPORT", pageIdentifier: pageIdentifier, reportType: "pageViews", datePreset: datePreset }, (response) => {
       if (chrome.runtime.lastError) {
         resolve(null);
         return;
@@ -1028,15 +1252,14 @@ function getPageData() {
   });
 }
 
-function getCountryData() {
+function getCountryData(datePreset = "7d") {
   return new Promise((resolve, reject) => {
-    chrome.runtime.sendMessage({ action: "GET_REPORT", pageIdentifier: pageIdentifier, reportType: "countryData" }, (response) => {
+    chrome.runtime.sendMessage({ action: "GET_REPORT", pageIdentifier: pageIdentifier, reportType: "countryData", datePreset: datePreset }, (response) => {
       if (chrome.runtime.lastError) {
         resolve(null);
         return;
       }
       if (response.success) {
-        console.log("[EX] Country Data Response:", response);
         resolve(response.reportData);
       } else {
         resolve(null);
@@ -1061,5 +1284,5 @@ async function getEnableOnPageFlag() {
 }
 
 function isDesktop() {
-  return window.innerWidth >= 900; // laptop/desktop threshold
+  return window.innerWidth >= 900;
 }
