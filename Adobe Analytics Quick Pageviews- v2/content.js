@@ -241,16 +241,32 @@ async function loadWidgetOnThePage() {
       background: #1a1a1a;
       border: 1px solid #333;
       border-radius: 6px;
-      padding: 8px 10px;
+      padding: 6px 8px;
       font-size: 11px;
       font-weight: 400;
       color: #ccc;
-      width: 180px;
       line-height: 1.4;
       z-index: 100;
       box-shadow: 0 4px 12px rgba(0,0,0,0.5);
-      white-space: normal;
+      white-space: nowrap;
     }
+
+    .info-tooltip-expanded {
+      width: 200px;
+      white-space: normal !important;
+    }
+
+    /* Minimal: show short, hide full */
+    .badge.minimal .info-tooltip-expanded { display: none !important; }
+    .badge.minimal .info-tip:hover .info-tooltip-minimal { display: block; }
+
+    /* Expanded: show full, hide short */
+    .badge.expanded .info-tooltip-minimal { display: none !important; }
+    .badge.expanded .info-tip:hover .info-tooltip-expanded { display: block; }
+
+    /* Collapsed: show short on hover */
+    .badge.collapsed .info-tooltip-expanded { display: none !important; }
+    .badge.collapsed .info-tip:hover .info-tooltip-minimal { display: block; }
 
     .info-tip:hover .info-tooltip {
       display: block;
@@ -606,7 +622,8 @@ async function loadWidgetOnThePage() {
       <div class="badge-title">
         <span>Adobe Analytics Pageviews</span>
         <span class="info-tip" id="headerInfoTip">i
-          <span class="info-tooltip">Data shown is not real-time and may have a delay of approximately 1 hour. Metrics reflect the latest available Adobe Analytics Workspace data.</span>
+          <span class="info-tooltip info-tooltip-minimal">Data may be delayed ~1 hr.</span>
+          <span class="info-tooltip info-tooltip-expanded">Data shown is not real-time and may have a delay of approximately 1 hour. Metrics reflect the latest available Adobe Analytics Workspace data.</span>
         </span>
       </div>
       <div class="toggle-wrap">
