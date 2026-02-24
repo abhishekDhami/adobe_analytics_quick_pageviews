@@ -91,13 +91,16 @@ function getSavedDatePreset() {
 
 function saveDatePreset(preset) {
   return new Promise((resolve) => {
-    chrome.runtime.sendMessage({ action: "SET_DATE_PRESET", datePreset: preset }, (response) => {
-      if (chrome.runtime.lastError) {
+    chrome.runtime.sendMessage(
+      { action: "SET_DATE_PRESET", datePreset: preset },
+      (response) => {
+        if (chrome.runtime.lastError) {
+          resolve();
+          return;
+        }
         resolve();
-        return;
-      }
-      resolve();
-    });
+      },
+    );
   });
 }
 
@@ -234,8 +237,7 @@ async function loadWidgetOnThePage() {
       display: none;
       position: absolute;
       top: 22px;
-      left: 50%;
-      transform: translateX(-50%);
+      right: 0;
       background: #1a1a1a;
       border: 1px solid #333;
       border-radius: 6px;
@@ -243,18 +245,11 @@ async function loadWidgetOnThePage() {
       font-size: 11px;
       font-weight: 400;
       color: #ccc;
-      width: 200px;
+      width: 180px;
       line-height: 1.4;
       z-index: 100;
       box-shadow: 0 4px 12px rgba(0,0,0,0.5);
       white-space: normal;
-    }
-
-    /* When badge is minimal (narrow), shift tooltip left so it doesn't overflow */
-    .badge.minimal .info-tip .info-tooltip {
-      left: auto;
-      right: 0;
-      transform: none;
     }
 
     .info-tip:hover .info-tooltip {
@@ -809,7 +804,10 @@ async function loadWidgetOnThePage() {
     badge.classList.add("expanded");
     showLoading();
     let resp = await checkToken();
-    if (!resp) { hideLoading(); return; }
+    if (!resp) {
+      hideLoading();
+      return;
+    }
     const pageData = await getPageData(currentDatePreset);
     const countryData = await getCountryData(currentDatePreset);
     hideLoading();
@@ -836,7 +834,10 @@ async function loadWidgetOnThePage() {
     showLoading();
     statusEl.textContent = "";
     let resp = await checkToken();
-    if (!resp) { hideLoading(); return; }
+    if (!resp) {
+      hideLoading();
+      return;
+    }
 
     const pageData = await getPageData(currentDatePreset);
     const countryData = await getCountryData(currentDatePreset);
@@ -896,7 +897,9 @@ async function loadWidgetOnThePage() {
     ev.preventDefault();
     startDrag(ev.clientX, ev.clientY);
   });
-  document.addEventListener("mousemove", (ev) => doDrag(ev.clientX, ev.clientY));
+  document.addEventListener("mousemove", (ev) =>
+    doDrag(ev.clientX, ev.clientY),
+  );
   document.addEventListener("mouseup", stopDrag);
 
   // touch events
@@ -922,11 +925,14 @@ async function loadWidgetOnThePage() {
 
   // ---------- reauthBtn Click handler ----------
   reauthBtn.addEventListener("click", () => {
-    chrome.runtime.sendMessage({ action: "OPEN_EXTENSION_OPTION" }, (response) => {
-      if (chrome.runtime.lastError) {
-        return;
-      }
-    });
+    chrome.runtime.sendMessage(
+      { action: "OPEN_EXTENSION_OPTION" },
+      (response) => {
+        if (chrome.runtime.lastError) {
+          return;
+        }
+      },
+    );
   });
 
   // ---------- Checking Token validity ----------
@@ -936,6 +942,7 @@ async function loadWidgetOnThePage() {
       statusEl.textContent = "";
       reauthBtn.hidden = true;
     } else {
+      hideLoading();
       statusEl.textContent = "Token is invalid or expired.";
       reauthBtn.hidden = false;
     }
@@ -944,16 +951,19 @@ async function loadWidgetOnThePage() {
 
   async function checkTokenValidity() {
     return new Promise((resolve) => {
-      chrome.runtime.sendMessage({ action: "GET_TOKEN_VALIDITY" }, (response) => {
-        if (response && response.success) {
-          resolve(true);
-        } else {
-          resolve(false);
-        }
-        if (chrome.runtime.lastError) {
-          return;
-        }
-      });
+      chrome.runtime.sendMessage(
+        { action: "GET_TOKEN_VALIDITY" },
+        (response) => {
+          if (response && response.success) {
+            resolve(true);
+          } else {
+            resolve(false);
+          }
+          if (chrome.runtime.lastError) {
+            return;
+          }
+        },
+      );
     });
   }
 
@@ -972,24 +982,31 @@ async function loadWidgetOnThePage() {
 
   async function fetchPageIdentifiers() {
     return new Promise((resolve, reject) => {
-      chrome.runtime.sendMessage({ action: "GET_PAGE_IDENTIFIERS" }, (response) => {
-        if (response.pageIdentifier && response.success) {
-          pageIdentifier = response.pageIdentifier;
-          if (pageIdentifier.source == "url") {
-            pageIdentifier.value = window.location.href;
-            resolve({ success: true, pageIdentifier: pageIdentifier });
-          } else if (pageIdentifier.source == "title") {
-            pageIdentifier.value = document.title;
-            resolve({ success: true, pageIdentifier: pageIdentifier });
-          } else if (pageIdentifier.source == "window") {
-            window.dispatchEvent(new CustomEvent("fetchPageWindowPathIdentifiers", { detail: pageIdentifier }));
-            resolve({});
+      chrome.runtime.sendMessage(
+        { action: "GET_PAGE_IDENTIFIERS" },
+        (response) => {
+          if (response.pageIdentifier && response.success) {
+            pageIdentifier = response.pageIdentifier;
+            if (pageIdentifier.source == "url") {
+              pageIdentifier.value = window.location.href;
+              resolve({ success: true, pageIdentifier: pageIdentifier });
+            } else if (pageIdentifier.source == "title") {
+              pageIdentifier.value = document.title;
+              resolve({ success: true, pageIdentifier: pageIdentifier });
+            } else if (pageIdentifier.source == "window") {
+              window.dispatchEvent(
+                new CustomEvent("fetchPageWindowPathIdentifiers", {
+                  detail: pageIdentifier,
+                }),
+              );
+              resolve({});
+            }
+          } else {
+            resolve({ success: false, pageIdentifier: {} });
           }
-        } else {
-          resolve({ success: false, pageIdentifier: {} });
-        }
-        return true;
-      });
+          return true;
+        },
+      );
     });
   }
 
@@ -1000,7 +1017,10 @@ async function loadWidgetOnThePage() {
     statusEl.textContent = "";
 
     // Minimal view always uses "7d" preset for today/yesterday
-    const [pageData, countryData] = await Promise.all([getPageData("7d"), getCountryData("7d")]);
+    const [pageData, countryData] = await Promise.all([
+      getPageData("7d"),
+      getCountryData("7d"),
+    ]);
     if (!pageData || !countryData) {
       hideLoading();
       statusEl.textContent = "No data available for this page.";
@@ -1067,7 +1087,12 @@ async function loadWidgetOnThePage() {
 
   function updateChartTitles() {
     const presetLabel = DATE_PRESET_LABELS[currentDatePreset] || "Last 7 Days";
-    const shortLabel = currentDatePreset === "7d" ? "7d" : currentDatePreset === "3w" ? "3w" : "5w";
+    const shortLabel =
+      currentDatePreset === "7d"
+        ? "7d"
+        : currentDatePreset === "3w"
+          ? "3w"
+          : "5w";
     const pvTitle = badge.querySelector("#pvChartTitle");
     const visitsTitle = badge.querySelector("#visitsChartTitle");
     const uvTitle = badge.querySelector("#uvChartTitle");
@@ -1292,20 +1317,41 @@ async function loadWidgetOnThePage() {
     const root = badge;
     const granularity = pageData.granularity || "day";
 
-    createVerticalChart(root.querySelector("#pvChart"), pageData.dates, pageData.pageViews, granularity);
+    createVerticalChart(
+      root.querySelector("#pvChart"),
+      pageData.dates,
+      pageData.pageViews,
+      granularity,
+    );
 
-    createVerticalChart(root.querySelector("#visitsChart"), pageData.dates, pageData.visits, granularity);
+    createVerticalChart(
+      root.querySelector("#visitsChart"),
+      pageData.dates,
+      pageData.visits,
+      granularity,
+    );
 
-    createVerticalChart(root.querySelector("#uvChart"), pageData.dates, pageData.visitors, granularity);
+    createVerticalChart(
+      root.querySelector("#uvChart"),
+      pageData.dates,
+      pageData.visitors,
+      granularity,
+    );
 
-    createHorizontalChart(root.querySelector("#countryChart"), countryData.countries, countryData.pageViews);
+    createHorizontalChart(
+      root.querySelector("#countryChart"),
+      countryData.countries,
+      countryData.pageViews,
+    );
   }
 
   async function updateFilterCondition() {
     const el = badge.querySelector("#filterCondition");
     if (!el) return;
 
-    const { pageIdentifierCondition } = await chrome.storage.local.get("pageIdentifierCondition");
+    const { pageIdentifierCondition } = await chrome.storage.local.get(
+      "pageIdentifierCondition",
+    );
 
     if (!pageIdentifierCondition) {
       el.textContent = "";
@@ -1319,49 +1365,70 @@ async function loadWidgetOnThePage() {
 
 function getPageData(datePreset = "7d") {
   return new Promise((resolve, reject) => {
-    chrome.runtime.sendMessage({ action: "GET_REPORT", pageIdentifier: pageIdentifier, reportType: "pageViews", datePreset: datePreset }, (response) => {
-      if (chrome.runtime.lastError) {
-        resolve(null);
-        return;
-      }
-      if (response.success) {
-        response.reportData.dates = response.reportData.dates.map((dt) => dt.split(",")[0]);
-        resolve(response.reportData);
-      } else {
-        resolve(null);
-      }
-    });
+    chrome.runtime.sendMessage(
+      {
+        action: "GET_REPORT",
+        pageIdentifier: pageIdentifier,
+        reportType: "pageViews",
+        datePreset: datePreset,
+      },
+      (response) => {
+        if (chrome.runtime.lastError) {
+          resolve(null);
+          return;
+        }
+        if (response.success) {
+          response.reportData.dates = response.reportData.dates.map(
+            (dt) => dt.split(",")[0],
+          );
+          resolve(response.reportData);
+        } else {
+          resolve(null);
+        }
+      },
+    );
   });
 }
 
 function getCountryData(datePreset = "7d") {
   return new Promise((resolve, reject) => {
-    chrome.runtime.sendMessage({ action: "GET_REPORT", pageIdentifier: pageIdentifier, reportType: "countryData", datePreset: datePreset }, (response) => {
-      if (chrome.runtime.lastError) {
-        resolve(null);
-        return;
-      }
-      if (response.success) {
-        resolve(response.reportData);
-      } else {
-        resolve(null);
-      }
-    });
+    chrome.runtime.sendMessage(
+      {
+        action: "GET_REPORT",
+        pageIdentifier: pageIdentifier,
+        reportType: "countryData",
+        datePreset: datePreset,
+      },
+      (response) => {
+        if (chrome.runtime.lastError) {
+          resolve(null);
+          return;
+        }
+        if (response.success) {
+          resolve(response.reportData);
+        } else {
+          resolve(null);
+        }
+      },
+    );
   });
 }
 
 async function getEnableOnPageFlag() {
   return new Promise((resolve) => {
-    chrome.runtime.sendMessage({ action: "GET_ENABLED_ON_PAGE_FLAG" }, (response) => {
-      if (response && typeof response.isEnabled === "boolean") {
-        resolve(response.isEnabled);
-      } else {
-        resolve(false);
-      }
-      if (chrome.runtime.lastError) {
-        return;
-      }
-    });
+    chrome.runtime.sendMessage(
+      { action: "GET_ENABLED_ON_PAGE_FLAG" },
+      (response) => {
+        if (response && typeof response.isEnabled === "boolean") {
+          resolve(response.isEnabled);
+        } else {
+          resolve(false);
+        }
+        if (chrome.runtime.lastError) {
+          return;
+        }
+      },
+    );
   });
 }
 
