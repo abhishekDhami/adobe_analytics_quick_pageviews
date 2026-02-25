@@ -653,18 +653,34 @@ crPrimaryDimension.addEventListener("change", async () => {
   // Fetch primary dimension values
   await fetchAndPopulatePrimaryValues(selectedDim);
 
-  // Update secondary dropdown (exclude primary)
+  // Update secondary dropdown (exclude primary) and clear stale secondary values
   populateSecondaryDimensionDropdown(selectedDim);
+  await chrome.storage.local.remove(["secondaryDimensionValues"]);
 });
 
-// When primary value dropdown changes, show/hide custom input
-crPrimaryValueSelect.addEventListener("change", () => {
+// When primary value dropdown changes, show/hide custom input and re-fetch secondary values if needed
+crPrimaryValueSelect.addEventListener("change", async () => {
   if (crPrimaryValueSelect.value === "__custom__") {
     crPrimaryValueCustom.style.display = "block";
     crPrimaryValueCustom.focus();
   } else {
     crPrimaryValueCustom.style.display = "none";
     crPrimaryValueCustom.value = "";
+  }
+
+  // If secondary dimension is already selected, re-fetch its values scoped to the new primary value
+  const secondaryDim = crSecondaryDimension.value;
+  if (secondaryDim && crPrimaryValueSelect.value !== "__custom__") {
+    await fetchAndSaveSecondaryValues(secondaryDim);
+  }
+});
+
+// When custom primary value input loses focus, re-fetch secondary values if needed
+crPrimaryValueCustom.addEventListener("blur", async () => {
+  const secondaryDim = crSecondaryDimension.value;
+  const customVal = crPrimaryValueCustom.value.trim();
+  if (secondaryDim && customVal) {
+    await fetchAndSaveSecondaryValues(secondaryDim);
   }
 });
 
@@ -981,6 +997,15 @@ async function populateCustomReportFields() {
   enableCustomReportCheckbox.checked = true;
   customReportConfigDiv.style.display = "block";
 
+  // Ensure custom input is hidden by default
+  crPrimaryValueCustom.style.display = "none";
+  crPrimaryValueCustom.value = "";
+
+  // Restore match condition first (before values load)
+  if (customReportConfig.primaryMatch) {
+    crPrimaryMatch.value = customReportConfig.primaryMatch;
+  }
+
   // Load dimensions first
   await loadDimensionsIfNeeded();
 
@@ -991,29 +1016,76 @@ async function populateCustomReportFields() {
   if (customReportConfig.primaryDimension?.id) {
     crPrimaryDimension.value = customReportConfig.primaryDimension.id;
 
-    // Populate primary values
-    await fetchAndPopulatePrimaryValues(customReportConfig.primaryDimension.id);
-    await new Promise((r) => setTimeout(r, 500)); // wait for values to load
+    // Populate primary values and wait for completion using a promise wrapper
+    await new Promise((resolve) => {
+      const { selectedCompanyID, selectedrsID } = { selectedCompanyID: null, selectedrsID: null };
+      chrome.storage.local.get(["selectedCompanyID", "selectedrsID"], (result) => {
+        if (!result.selectedCompanyID || !result.selectedrsID) {
+          resolve();
+          return;
+        }
+        chrome.runtime.sendMessage(
+          {
+            action: "FETCH_DIMENSION_VALUES",
+            companyId: result.selectedCompanyID,
+            rsid: result.selectedrsID,
+            dimensionId: customReportConfig.primaryDimension.id,
+            limit: 50,
+          },
+          async (response) => {
+            if (chrome.runtime.lastError || !response?.success) {
+              resolve();
+              return;
+            }
+            const values = response.values || [];
+            await chrome.storage.local.set({ primaryDimensionValues: JSON.stringify(values) });
 
-    // Restore primary value
-    if (customReportConfig.primaryValue) {
-      // Try setting from dropdown
-      crPrimaryValueSelect.value = customReportConfig.primaryValue;
-      // If not found in dropdown (custom value), select __custom__ and show input
-      if (!crPrimaryValueSelect.value || crPrimaryValueSelect.value === "") {
-        crPrimaryValueSelect.value = "__custom__";
-        crPrimaryValueCustom.style.display = "block";
-        crPrimaryValueCustom.value = customReportConfig.primaryValue;
-      }
-    }
+            crPrimaryValueSelect.innerHTML = "";
+
+            const defaultOpt = document.createElement("option");
+            defaultOpt.value = "";
+            defaultOpt.textContent = "Select a value";
+            defaultOpt.disabled = true;
+            defaultOpt.selected = true;
+            crPrimaryValueSelect.appendChild(defaultOpt);
+
+            values.forEach((v) => {
+              const opt = document.createElement("option");
+              opt.value = v.value;
+              opt.textContent = `${v.value} (${v.count.toLocaleString()})`;
+              crPrimaryValueSelect.appendChild(opt);
+            });
+
+            const customOpt = document.createElement("option");
+            customOpt.value = "__custom__";
+            customOpt.textContent = "-- Enter custom value --";
+            crPrimaryValueSelect.appendChild(customOpt);
+
+            crPrimaryValueSelect.disabled = false;
+
+            // Now restore the saved primary value
+            if (customReportConfig.primaryValue) {
+              crPrimaryValueSelect.value = customReportConfig.primaryValue;
+              if (!crPrimaryValueSelect.value || crPrimaryValueSelect.value === "") {
+                // Value not in dropdown — it was a custom value
+                crPrimaryValueSelect.value = "__custom__";
+                crPrimaryValueCustom.style.display = "block";
+                crPrimaryValueCustom.value = customReportConfig.primaryValue;
+              } else {
+                // Found in dropdown — make sure custom input stays hidden
+                crPrimaryValueCustom.style.display = "none";
+                crPrimaryValueCustom.value = "";
+              }
+            }
+
+            resolve();
+          },
+        );
+      });
+    });
 
     // Populate secondary dropdown
     populateSecondaryDimensionDropdown(customReportConfig.primaryDimension.id);
-  }
-
-  // Restore match condition
-  if (customReportConfig.primaryMatch) {
-    crPrimaryMatch.value = customReportConfig.primaryMatch;
   }
 
   // Restore secondary dimension

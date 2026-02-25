@@ -1669,7 +1669,7 @@ async function loadWidgetOnThePage() {
 
     if (customFilters.secondaryDimension && customFilters.secondaryValue) {
       const secLabel = customReportConfig.secondaryDimension?.displayLabel || customFilters.secondaryDimension;
-      condition += ` AND ${secLabel} = '${customFilters.secondaryValue}'`;
+      condition += ` AND ${secLabel} exact '${customFilters.secondaryValue}'`;
     }
 
     el.textContent = `Filter: ${condition}`;
