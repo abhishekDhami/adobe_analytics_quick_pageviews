@@ -149,6 +149,11 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       sendResponse(resp);
     });
     return true;
+  } else if (msg.action === "GET_CUSTOM_REPORT") {
+    getCustomReport(msg.pageIdentifier, msg.reportType, msg.datePreset, msg.customFilters).then((reportData) => {
+      sendResponse(reportData);
+    });
+    return true;
   }
   return true;
 });
@@ -373,6 +378,216 @@ function getReport(pageIdentifier, reportType = "pageViews", datePreset = "7d") 
   });
 }
 
+// Custom report: same as getReport but with additional dimension filters (primary + optional secondary)
+// customFilters = { primaryDimension: "variables/evar5", primaryMatch: "exact"|"contains", primaryValue: "ABC",
+//                   secondaryDimension: "variables/prop3" (optional), secondaryValue: "XYZ" (optional) }
+function getCustomReport(pageIdentifier, reportType = "pageViews", datePreset = "7d", customFilters = {}) {
+  return new Promise(async (resolve, reject) => {
+    try {
+      const { client_id, selectedCompanyID, selectedrsID, pageIdentifierConfig } = await chrome.storage.local.get(["client_id", "selectedCompanyID", "selectedrsID", "pageIdentifierConfig"]);
+
+      if (pageIdentifier == undefined || !customFilters.primaryDimension) resolve(null);
+
+      const presetConfig = getDateRangeForPreset(datePreset);
+      let dateRangeString = presetConfig.dateRangeString;
+
+      // Build page identifier value (same as getReport)
+      let adobeDimension = pageIdentifierConfig.adobeDimensionConfig.dimension || "Page";
+      adobeDimension = adobeDimension.toLowerCase();
+      let pageIdentifierValue = "";
+      if (pageIdentifierConfig.source === "url") {
+        pageIdentifierValue = pageIdentifier.value;
+        let urlObj = new URL(pageIdentifierValue);
+        if (pageIdentifierConfig.urlConfig?.removeQuery) urlObj.search = "";
+        if (pageIdentifierConfig.urlConfig?.removeHash) urlObj.hash = "";
+        pageIdentifierValue = urlObj.toString();
+      } else if (pageIdentifierConfig.source === "title") {
+        pageIdentifierValue = pageIdentifier.value;
+        if (pageIdentifierConfig.titleConfig?.lowercase) pageIdentifierValue = pageIdentifierValue.toLowerCase();
+        if (pageIdentifierConfig.titleConfig?.trim) pageIdentifierValue = pageIdentifierValue.trim();
+      } else if (pageIdentifierConfig.source === "window") {
+        pageIdentifierValue = pageIdentifier.value;
+      } else {
+        resolve({ reportData: null, success: false });
+        return;
+      }
+
+      // Truncation
+      let truncationResult;
+      if (adobeDimension === "page" || adobeDimension.includes("prop")) {
+        truncationResult = safeAdobeTruncate(pageIdentifierValue, 100);
+        pageIdentifierValue = truncationResult.opStr;
+      } else if (adobeDimension.includes("evar")) {
+        truncationResult = safeAdobeTruncate(pageIdentifierValue, 250);
+        pageIdentifierValue = truncationResult.opStr;
+      }
+      if (pageIdentifierValue.length === 0) {
+        resolve({ reportData: null, success: false });
+        return;
+      }
+
+      let segmentMatchCondition = pageIdentifierConfig.adobeDimensionConfig.match;
+      if (segmentMatchCondition === "exact") segmentMatchCondition = "streq";
+      else segmentMatchCondition = "contains";
+      if (segmentMatchCondition === "streq" && truncationResult?.maxLimitReached === true) {
+        segmentMatchCondition = "contains";
+      }
+
+      // Build custom report cache key
+      let customCacheKey = `CRCACHE||${selectedrsID}||${customFilters.primaryDimension}||${customFilters.primaryValue}||${customFilters.secondaryDimension || "none"}||${customFilters.secondaryValue || "none"}||${reportType}||${datePreset}`;
+      let pattern = /[^a-zA-Z0-9|\s]/g;
+      customCacheKey = customCacheKey.replace(pattern, "");
+
+      // Check cache
+      const cacheResult = await chrome.storage.local.get([customCacheKey]);
+      if (cacheResult && cacheResult[customCacheKey]) {
+        const { data, ttl } = cacheResult[customCacheKey];
+        const now = new Date().getTime();
+        if (ttl && now <= ttl) {
+          resolve({ reportData: data, success: true, fromCache: true });
+          return;
+        } else {
+          await chrome.storage.local.remove([customCacheKey]);
+        }
+      }
+
+      // Build metrics and dimension
+      let metricsArray = [], rowDimension = "", customSettings = {};
+      if (reportType === "countryData") {
+        metricsArray = [{ id: "metrics/pageviews", columnId: "0", sort: "desc" }];
+        rowDimension = "variables/geocountry";
+        customSettings = { limit: 5 };
+      } else if (reportType === "pageViews") {
+        metricsArray = [
+          { id: "metrics/pageviews", columnId: "0" },
+          { id: "metrics/visits", columnId: "1" },
+          { id: "metrics/visitors", columnId: "2" },
+        ];
+        rowDimension = presetConfig.dimension;
+        customSettings = { limit: presetConfig.limit, dimensionSort: "asc" };
+      }
+
+      // Build segment predicates: page identifier AND primary dimension AND optional secondary
+      let andPredicates = [];
+
+      // Page identifier predicate
+      andPredicates.push({
+        func: "container",
+        context: "hits",
+        pred: {
+          func: segmentMatchCondition,
+          val: { func: "attr", name: `variables/${adobeDimension}` },
+          str: pageIdentifierValue,
+        },
+      });
+
+      // Primary dimension predicate
+      let primaryMatchFunc = customFilters.primaryMatch === "exact" ? "streq" : "contains";
+      andPredicates.push({
+        func: "container",
+        context: "hits",
+        pred: {
+          func: primaryMatchFunc,
+          val: { func: "attr", name: customFilters.primaryDimension },
+          str: customFilters.primaryValue,
+        },
+      });
+
+      // Secondary dimension predicate (optional)
+      if (customFilters.secondaryDimension && customFilters.secondaryValue) {
+        andPredicates.push({
+          func: "container",
+          context: "hits",
+          pred: {
+            func: "streq",
+            val: { func: "attr", name: customFilters.secondaryDimension },
+            str: customFilters.secondaryValue,
+          },
+        });
+      }
+
+      let reportReq = {
+        rsid: selectedrsID,
+        globalFilters: [
+          { type: "dateRange", dateRange: dateRangeString },
+          {
+            type: "segment",
+            segmentDefinition: {
+              func: "segment",
+              version: [1, 0, 0],
+              container: {
+                func: "container",
+                context: "hits",
+                pred: {
+                  func: "and",
+                  preds: andPredicates,
+                },
+              },
+            },
+          },
+        ],
+        metricContainer: { metrics: metricsArray },
+        dimension: rowDimension,
+        settings: customSettings,
+      };
+
+      let finalReportURL = `${reportingAPIURL}/${selectedCompanyID}/reports`;
+      let tokenResponse = await getValidAccessToken();
+      if (tokenResponse.success !== true) {
+        resolve(tokenResponse);
+        return;
+      }
+      let accessToken = tokenResponse.accessToken;
+
+      const resp = await fetch(finalReportURL, {
+        method: "POST",
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "x-api-key": client_id,
+          Accept: "application/json",
+          "Content-Type": "application/json",
+        },
+        body: JSON.stringify(reportReq),
+      });
+
+      const reportData = await resp.json();
+      let rows = reportData?.rows || [];
+      if (rows && rows.length > 0) {
+        let data = null;
+        if (reportType === "pageViews") {
+          data = { dates: [], pageViews: [], visits: [], visitors: [], filteredTotals: [], granularity: presetConfig.granularity };
+          rows.forEach((row) => {
+            data.dates.push(row.value);
+            data.pageViews.push(row.data[0]);
+            data.visits.push(row.data[1]);
+            data.visitors.push(row.data[2]);
+          });
+          data.filteredTotals = reportData?.summaryData?.filteredTotals || [];
+        } else if (reportType === "countryData") {
+          data = { countries: [], pageViews: [] };
+          let totals = reportData?.summaryData.filteredTotals[0];
+          rows.forEach((row) => {
+            data.countries.push(row.value);
+            let prctContribution = (row.data[0] / totals) * 100;
+            prctContribution = parseFloat(prctContribution.toFixed(2));
+            data.pageViews.push(prctContribution);
+          });
+        }
+        // Save to cache
+        let ttl = new Date().getTime() + 15 * 60 * 1000;
+        await chrome.storage.local.set({ [customCacheKey]: { data: data, ttl } });
+        resolve({ reportData: data, success: true, fromCache: false });
+        cleanupExpiredCache();
+      } else {
+        resolve({ reportData: null, success: false });
+      }
+    } catch (error) {
+      console.log("Error fetching custom report data:", error);
+      resolve({ error: "Failed to fetch custom report data." });
+    }
+  });
+}
+
 function readCache(rsid, pageIdentifierValue, pageIdentifierDimension, pageIdentifierMatchType, reportType, datePreset = "7d") {
   return new Promise(async (resolve, reject) => {
     try {
@@ -424,7 +639,7 @@ async function cleanupExpiredCache() {
   const keysToRemove = [];
 
   for (const [key, value] of Object.entries(allItems)) {
-    if (!key.startsWith("CACHE||")) continue;
+    if (!key.startsWith("CACHE||") && !key.startsWith("CRCACHE||")) continue;
     if (!value || !value.ttl || now > value.ttl) {
       keysToRemove.push(key);
     }
