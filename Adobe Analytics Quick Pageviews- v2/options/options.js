@@ -926,6 +926,22 @@ async function fetchAndSaveSecondaryValues(dimensionId) {
 
   if (!selectedCompanyID || !selectedrsID) return;
 
+  // Build segment filter from primary dimension selection
+  const primaryDim = crPrimaryDimension.value;
+  const primaryMatch = crPrimaryMatch.value;
+  const primaryValueFromSelect = crPrimaryValueSelect.value;
+  const primaryValueCustom = crPrimaryValueCustom.value.trim();
+  const primaryValue = primaryValueFromSelect === "__custom__" ? primaryValueCustom : primaryValueFromSelect;
+
+  let segmentFilter = null;
+  if (primaryDim && primaryValue) {
+    segmentFilter = {
+      dimension: primaryDim,
+      match: primaryMatch,
+      value: primaryValue,
+    };
+  }
+
   // Show a brief loading message
   showMessage({ msg: "Fetching secondary dimension values...", type: "info" });
 
@@ -936,6 +952,7 @@ async function fetchAndSaveSecondaryValues(dimensionId) {
       rsid: selectedrsID,
       dimensionId: dimensionId,
       limit: 50,
+      segmentFilter: segmentFilter,
     },
     async (response) => {
       if (chrome.runtime.lastError) return;
