@@ -709,7 +709,7 @@ async function fetchDimensions(companyId, rsid) {
     const { client_id } = await chrome.storage.local.get(["client_id"]);
 
     const resp = await fetch(
-      `${reportingAPIURL}/${companyId}/dimensions?rsid=${encodeURIComponent(rsid)}&locale=en_US&expansion=tags`,
+      `${reportingAPIURL}/${companyId}/dimensions?rsid=${encodeURIComponent(rsid)}&locale=en_US&expansion=tags,extraTitleInfo`,
       {
         headers: {
           Authorization: `Bearer ${accessToken}`,
@@ -726,17 +726,23 @@ async function fetchDimensions(companyId, rsid) {
       return { error: data.message || "Failed to fetch dimensions.", success: false };
     }
 
-    // Filter to only props and eVars
+    // Filter to only props and eVars (including classified sub-dimensions)
     const filtered = data
       .filter((dim) => {
         const id = dim.id || "";
         return id.startsWith("variables/prop") || id.startsWith("variables/evar");
       })
-      .map((dim) => ({
-        id: dim.id, // e.g., "variables/prop1", "variables/evar5"
-        name: dim.name || "", // friendly name configured in report suite
-        type: dim.id.includes("prop") ? "prop" : "evar",
-      }))
+      .map((dim) => {
+        const id = dim.id;
+        const isClassified = id.includes(".");
+        return {
+          id: id, // e.g., "variables/prop1", "variables/prop23.year-of-publication"
+          name: dim.name || "", // friendly name
+          type: id.includes("prop") ? "prop" : "evar",
+          isClassified: isClassified,
+          extraTitleInfo: dim.extraTitleInfo || "", // parent dimension name for classified vars
+        };
+      })
       .sort((a, b) => {
         // Sort: props first then eVars, numerically within each group
         if (a.type !== b.type) return a.type === "prop" ? -1 : 1;

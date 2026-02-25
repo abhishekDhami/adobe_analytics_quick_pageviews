@@ -767,7 +767,7 @@
                             title="Select a prop or eVar to use as the main filter for the custom report. This acts as a global filter on the widget.">i</span>
                     </label>
                     <select id="crPrimaryDimension" disabled>
-                        <option value="" disabled selected>Loading dimensions…</option>
+                        <option value="" disabled selected>Loading dimensions...</option>
                     </select>
 
                     <!-- Match Condition -->
@@ -783,15 +783,13 @@
                     <!-- Primary Value -->
                     <label for="crPrimaryValue">Primary Value:
                         <span class="info-icon"
-                            title="Select a value from the top 50 values (last 30 days) or type a custom value.">i</span>
+                            title="Select a value from the top 50 values (last 30 days) or choose 'Enter custom value' to type your own.">i</span>
                     </label>
-                    <div style="display:flex; gap:8px; align-items:stretch;">
-                        <select id="crPrimaryValueSelect" disabled style="flex:1;">
-                            <option value="" disabled selected>Select primary dimension first</option>
-                        </select>
-                        <input type="text" id="crPrimaryValueCustom" placeholder="Or type custom value"
-                            style="flex:1;" />
-                    </div>
+                    <select id="crPrimaryValueSelect" disabled>
+                        <option value="" disabled selected>Select primary dimension first</option>
+                    </select>
+                    <input type="text" id="crPrimaryValueCustom" placeholder="Type custom value"
+                        style="display:none; margin-top:6px;" />
 
                     <hr style="border-color: rgba(255,255,255,0.06); margin: 14px 0;" />
 

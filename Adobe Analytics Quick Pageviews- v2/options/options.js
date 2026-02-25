@@ -445,7 +445,7 @@ async function clearStep2andStep3Fields() {
   allDimensions = [];
   enableCustomReportCheckbox.checked = false;
   customReportConfigDiv.style.display = "none";
-  crPrimaryDimension.innerHTML = '<option value="" disabled selected>Loading dimensions…</option>';
+  crPrimaryDimension.innerHTML = '<option value="" disabled selected>Loading dimensions...</option>';
   crPrimaryDimension.disabled = true;
   crPrimaryValueSelect.innerHTML = '<option value="" disabled selected>Select primary dimension first</option>';
   crPrimaryValueSelect.disabled = true;
@@ -657,6 +657,17 @@ crPrimaryDimension.addEventListener("change", async () => {
   populateSecondaryDimensionDropdown(selectedDim);
 });
 
+// When primary value dropdown changes, show/hide custom input
+crPrimaryValueSelect.addEventListener("change", () => {
+  if (crPrimaryValueSelect.value === "__custom__") {
+    crPrimaryValueCustom.style.display = "block";
+    crPrimaryValueCustom.focus();
+  } else {
+    crPrimaryValueCustom.style.display = "none";
+    crPrimaryValueCustom.value = "";
+  }
+});
+
 // When secondary dimension changes, fetch and save its values
 crSecondaryDimension.addEventListener("change", async () => {
   const selectedDim = crSecondaryDimension.value;
@@ -672,8 +683,8 @@ saveCustomReportBtn.addEventListener("click", async () => {
   const primaryValueCustom = crPrimaryValueCustom.value.trim();
   const secondaryDim = crSecondaryDimension.value;
 
-  // Primary value: custom input takes priority if filled
-  const primaryValue = primaryValueCustom || primaryValueFromSelect;
+  // Primary value: custom input if "__custom__" selected, otherwise dropdown value
+  const primaryValue = primaryValueFromSelect === "__custom__" ? primaryValueCustom : primaryValueFromSelect;
 
   if (!primaryDim) {
     showMessage({ msg: "Please select a Primary Dimension.", type: "error" });
@@ -722,6 +733,7 @@ clearCustomReportBtn.addEventListener("click", async () => {
   crPrimaryValueSelect.innerHTML = "<option value='' disabled selected>Select primary dimension first</option>";
   crPrimaryValueSelect.disabled = true;
   crPrimaryValueCustom.value = "";
+  crPrimaryValueCustom.style.display = "none";
   crSecondaryDimension.innerHTML = "<option value='' disabled selected>Select primary dimension first</option>";
   crSecondaryDimension.disabled = true;
 
@@ -732,9 +744,20 @@ clearCustomReportBtn.addEventListener("click", async () => {
 
 function formatDimensionLabel(dimObj) {
   if (!dimObj) return "";
-  // Extract short name like "Prop1" or "eVar5" from id "variables/prop1" or "variables/evar5"
-  const idParts = dimObj.id.replace("variables/", "");
-  const shortName = idParts.charAt(0).toUpperCase() + idParts.slice(1); // "Prop1" or "Evar5"
+  const idRaw = dimObj.id.replace("variables/", "");
+
+  if (dimObj.isClassified && dimObj.extraTitleInfo) {
+    // Classified: e.g., "Prop23 ('Year of Publication' Classified from 'Content Publish Date')"
+    // Extract base var name like "Prop23" from "prop23.year-of-publication"
+    const basePart = idRaw.split(".")[0];
+    const shortBase = basePart.charAt(0).toUpperCase() + basePart.slice(1);
+    const classifiedName = dimObj.name || "";
+    const parentName = dimObj.extraTitleInfo || "";
+    return `${shortBase} ('${classifiedName}' Classified from '${parentName}')`;
+  }
+
+  // Standard: e.g., "Prop1 (Site Section)"
+  const shortName = idRaw.charAt(0).toUpperCase() + idRaw.slice(1);
   const friendlyName = dimObj.name || "";
   return friendlyName ? `${shortName} (${friendlyName})` : shortName;
 }
@@ -768,7 +791,7 @@ async function loadDimensionsIfNeeded() {
   }
 
   // Fetch from API
-  crPrimaryDimension.innerHTML = '<option value="" disabled selected>Loading dimensions…</option>';
+  crPrimaryDimension.innerHTML = '<option value="" disabled selected>Loading dimensions...</option>';
   crPrimaryDimension.disabled = true;
 
   chrome.runtime.sendMessage(
@@ -840,8 +863,10 @@ async function fetchAndPopulatePrimaryValues(dimensionId) {
     return;
   }
 
-  crPrimaryValueSelect.innerHTML = '<option value="" disabled selected>Loading values…</option>';
+  crPrimaryValueSelect.innerHTML = '<option value="" disabled selected>Loading values...</option>';
   crPrimaryValueSelect.disabled = true;
+  crPrimaryValueCustom.style.display = "none";
+  crPrimaryValueCustom.value = "";
 
   chrome.runtime.sendMessage(
     {
@@ -877,6 +902,12 @@ async function fetchAndPopulatePrimaryValues(dimensionId) {
           crPrimaryValueSelect.appendChild(opt);
         });
 
+        // Add "Enter custom value" as last option
+        const customOpt = document.createElement("option");
+        customOpt.value = "__custom__";
+        customOpt.textContent = "-- Enter custom value --";
+        crPrimaryValueSelect.appendChild(customOpt);
+
         crPrimaryValueSelect.disabled = false;
 
         if (values.length === 0) {
@@ -896,7 +927,7 @@ async function fetchAndSaveSecondaryValues(dimensionId) {
   if (!selectedCompanyID || !selectedrsID) return;
 
   // Show a brief loading message
-  showMessage({ msg: "Fetching secondary dimension values…", type: "info" });
+  showMessage({ msg: "Fetching secondary dimension values...", type: "info" });
 
   chrome.runtime.sendMessage(
     {
@@ -951,8 +982,10 @@ async function populateCustomReportFields() {
     if (customReportConfig.primaryValue) {
       // Try setting from dropdown
       crPrimaryValueSelect.value = customReportConfig.primaryValue;
-      // If not found in dropdown (custom value), put it in the text input
-      if (!crPrimaryValueSelect.value) {
+      // If not found in dropdown (custom value), select __custom__ and show input
+      if (!crPrimaryValueSelect.value || crPrimaryValueSelect.value === "") {
+        crPrimaryValueSelect.value = "__custom__";
+        crPrimaryValueCustom.style.display = "block";
         crPrimaryValueCustom.value = customReportConfig.primaryValue;
       }
     }
