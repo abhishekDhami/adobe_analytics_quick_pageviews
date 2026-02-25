@@ -1,6 +1,7 @@
 const step1 = document.getElementById("step1");
 const step2 = document.getElementById("step2");
 const step3 = document.getElementById("step3");
+const step4 = document.getElementById("step4");
 const authBtn = document.getElementById("authBtn");
 const clearAuthBtn = document.getElementById("clearAuthBtn");
 const saveConfigBtn = document.getElementById("saveConfigBtn");
@@ -128,6 +129,7 @@ async function populateCompaniesAndSuites(companiesData) {
   await chrome.storage.local.set({ companiesList: companies });
   step2.style.display = "block";
   step3.style.display = "block";
+  step4.style.display = "block";
 }
 
 async function fetchCompaniesData() {
@@ -152,6 +154,10 @@ companySelect.addEventListener("change", async () => {
   let companyId = companySelect.value;
   if (!companyId) return;
   let rsids = [];
+
+  // Clear cached dimensions since RSID will change
+  allDimensions = [];
+  await chrome.storage.local.remove(["dimensionsList", "primaryDimensionValues", "secondaryDimensionValues"]);
 
   chrome.runtime.sendMessage({ type: "FETCH_REPORT_SUITES", companyId }, async (response) => {
     if (response.success) {
@@ -278,8 +284,9 @@ function askUserToReauthenticate() {
   authBtn.disabled = false;
   step2.style.display = "none";
   step3.style.display = "none";
+  step4.style.display = "none";
   let userpasswordElem = document.getElementById("userpassword");
-  userpasswordElem.value = ""; //dummy value to indicate password is set
+  userpasswordElem.value = "";
   userpasswordElem.disabled = false;
   userpasswordElem.type = "text";
   //remove accessToken, Refreshtoken, expires_at, encyptedVarifier, saltBase64, "credsStored"
@@ -424,7 +431,7 @@ async function clearStep2andStep3Fields() {
   rsidSelect.innerHTML = "";
   rsidSelect.disabled = true;
   companySelect.innerHTML = "<option value='' disabled selected>Select company</option>";
-  await chrome.storage.local.remove(["selectedCompanyID", "selectedrsID", "pageIdentifierConfig"]);
+  await chrome.storage.local.remove(["selectedCompanyID", "selectedrsID", "pageIdentifierConfig", "customReportConfig", "dimensionsList", "primaryDimensionValues", "secondaryDimensionValues"]);
   step3.querySelectorAll("input, select").forEach((el) => {
     if (el.type === "checkbox") el.checked = false;
     else el.value = "";
@@ -433,6 +440,18 @@ async function clearStep2andStep3Fields() {
   showMessage({ msg: "Select company and report suite again.", type: "info" });
   populateStep2andStep3Fields(true);
   togglePageIdentifierSource("url");
+
+  // Reset custom report UI
+  allDimensions = [];
+  enableCustomReportCheckbox.checked = false;
+  customReportConfigDiv.style.display = "none";
+  crPrimaryDimension.innerHTML = '<option value="" disabled selected>Loading dimensions…</option>';
+  crPrimaryDimension.disabled = true;
+  crPrimaryValueSelect.innerHTML = '<option value="" disabled selected>Select primary dimension first</option>';
+  crPrimaryValueSelect.disabled = true;
+  crPrimaryValueCustom.value = "";
+  crSecondaryDimension.innerHTML = '<option value="" disabled selected>Select primary dimension first</option>';
+  crSecondaryDimension.disabled = true;
 }
 
 async function populateStep2andStep3Fields(defaultSetting = false) {
@@ -442,6 +461,7 @@ async function populateStep2andStep3Fields(defaultSetting = false) {
       if (selectedCompanyID && selectedrsID) {
         step2.style.display = "block";
         step3.style.display = "block";
+        step4.style.display = "block";
         if (companiesList) {
           companySelect.innerHTML = "";
           if (defaultSetting) {
@@ -527,6 +547,7 @@ async function populateStep2andStep3Fields(defaultSetting = false) {
         document.getElementById("piTitleTrim").checked = true;
       }
       validateStep2AndStep3Fields();
+      populateCustomReportFields();
     } else {
       handleTokenErrorResponse(response);
     }
@@ -539,6 +560,7 @@ async function populateStep2andStep3Fields(defaultSetting = false) {
 async function handleTokenErrorResponse(response) {
   step2.style.display = "none";
   step3.style.display = "none";
+  step4.style.display = "none";
   if (response.reauthenticate) {
     askUserToReauthenticate();
   } else if (response.reenterpassword) {
@@ -598,6 +620,358 @@ enableOnPageToggle.addEventListener("change", async () => {
   const isEnabled = enableOnPageToggle.checked;
   await chrome.storage.local.set({ enableOnPage: isEnabled });
 });
+
+// =============================================
+// CUSTOM REPORT — Step 4
+// =============================================
+const enableCustomReportCheckbox = document.getElementById("enableCustomReport");
+const customReportConfigDiv = document.getElementById("customReportConfig");
+const crPrimaryDimension = document.getElementById("crPrimaryDimension");
+const crPrimaryMatch = document.getElementById("crPrimaryMatch");
+const crPrimaryValueSelect = document.getElementById("crPrimaryValueSelect");
+const crPrimaryValueCustom = document.getElementById("crPrimaryValueCustom");
+const crSecondaryDimension = document.getElementById("crSecondaryDimension");
+const saveCustomReportBtn = document.getElementById("saveCustomReportBtn");
+const clearCustomReportBtn = document.getElementById("clearCustomReportBtn");
+
+let allDimensions = []; // cached dimension list
+
+// Show/hide custom report config when checkbox toggled
+enableCustomReportCheckbox.addEventListener("change", async () => {
+  const isEnabled = enableCustomReportCheckbox.checked;
+  customReportConfigDiv.style.display = isEnabled ? "block" : "none";
+  if (isEnabled) {
+    await loadDimensionsIfNeeded();
+  }
+});
+
+// When primary dimension changes, fetch its values and update secondary dropdown
+crPrimaryDimension.addEventListener("change", async () => {
+  const selectedDim = crPrimaryDimension.value;
+  if (!selectedDim) return;
+
+  // Fetch primary dimension values
+  await fetchAndPopulatePrimaryValues(selectedDim);
+
+  // Update secondary dropdown (exclude primary)
+  populateSecondaryDimensionDropdown(selectedDim);
+});
+
+// When secondary dimension changes, fetch and save its values
+crSecondaryDimension.addEventListener("change", async () => {
+  const selectedDim = crSecondaryDimension.value;
+  if (!selectedDim) return;
+  await fetchAndSaveSecondaryValues(selectedDim);
+});
+
+// Save Custom Report config
+saveCustomReportBtn.addEventListener("click", async () => {
+  const primaryDim = crPrimaryDimension.value;
+  const primaryMatch = crPrimaryMatch.value;
+  const primaryValueFromSelect = crPrimaryValueSelect.value;
+  const primaryValueCustom = crPrimaryValueCustom.value.trim();
+  const secondaryDim = crSecondaryDimension.value;
+
+  // Primary value: custom input takes priority if filled
+  const primaryValue = primaryValueCustom || primaryValueFromSelect;
+
+  if (!primaryDim) {
+    showMessage({ msg: "Please select a Primary Dimension.", type: "error" });
+    return;
+  }
+  if (!primaryValue) {
+    showMessage({ msg: "Please select or enter a Primary Value.", type: "error" });
+    return;
+  }
+
+  // Find friendly names
+  const primaryDimObj = allDimensions.find((d) => d.id === primaryDim);
+  const secondaryDimObj = allDimensions.find((d) => d.id === secondaryDim);
+
+  const config = {
+    enabled: true,
+    primaryDimension: {
+      id: primaryDim,
+      name: primaryDimObj?.name || "",
+      displayLabel: formatDimensionLabel(primaryDimObj),
+    },
+    primaryMatch: primaryMatch,
+    primaryValue: primaryValue,
+    secondaryDimension: secondaryDim
+      ? {
+          id: secondaryDim,
+          name: secondaryDimObj?.name || "",
+          displayLabel: formatDimensionLabel(secondaryDimObj),
+        }
+      : null,
+  };
+
+  await chrome.storage.local.set({ customReportConfig: config });
+  showMessage({ msg: "Custom Report configuration saved!", type: "success" });
+});
+
+// Clear Custom Report config
+clearCustomReportBtn.addEventListener("click", async () => {
+  await chrome.storage.local.remove(["customReportConfig", "primaryDimensionValues", "secondaryDimensionValues"]);
+
+  enableCustomReportCheckbox.checked = false;
+  customReportConfigDiv.style.display = "none";
+
+  crPrimaryDimension.value = "";
+  crPrimaryMatch.value = "exact";
+  crPrimaryValueSelect.innerHTML = "<option value='' disabled selected>Select primary dimension first</option>";
+  crPrimaryValueSelect.disabled = true;
+  crPrimaryValueCustom.value = "";
+  crSecondaryDimension.innerHTML = "<option value='' disabled selected>Select primary dimension first</option>";
+  crSecondaryDimension.disabled = true;
+
+  showMessage({ msg: "Custom Report configuration cleared.", type: "success" });
+});
+
+// ---------- Helper Functions ----------
+
+function formatDimensionLabel(dimObj) {
+  if (!dimObj) return "";
+  // Extract short name like "Prop1" or "eVar5" from id "variables/prop1" or "variables/evar5"
+  const idParts = dimObj.id.replace("variables/", "");
+  const shortName = idParts.charAt(0).toUpperCase() + idParts.slice(1); // "Prop1" or "Evar5"
+  const friendlyName = dimObj.name || "";
+  return friendlyName ? `${shortName} (${friendlyName})` : shortName;
+}
+
+async function loadDimensionsIfNeeded() {
+  if (allDimensions.length > 0) {
+    populatePrimaryDimensionDropdown();
+    return;
+  }
+
+  const { selectedCompanyID, selectedrsID, dimensionsList } = await chrome.storage.local.get([
+    "selectedCompanyID",
+    "selectedrsID",
+    "dimensionsList",
+  ]);
+
+  // Try loading from cache first
+  if (dimensionsList) {
+    try {
+      allDimensions = JSON.parse(dimensionsList);
+      populatePrimaryDimensionDropdown();
+      return;
+    } catch (e) {
+      // corrupted cache, re-fetch
+    }
+  }
+
+  if (!selectedCompanyID || !selectedrsID) {
+    showMessage({ msg: "Please select Company and Report Suite first (Step 2).", type: "error" });
+    return;
+  }
+
+  // Fetch from API
+  crPrimaryDimension.innerHTML = '<option value="" disabled selected>Loading dimensions…</option>';
+  crPrimaryDimension.disabled = true;
+
+  chrome.runtime.sendMessage(
+    { action: "FETCH_DIMENSIONS", companyId: selectedCompanyID, rsid: selectedrsID },
+    async (response) => {
+      if (chrome.runtime.lastError) {
+        showMessage({ msg: "Error fetching dimensions.", type: "error" });
+        return;
+      }
+      if (response.success) {
+        allDimensions = response.dimensions;
+        await chrome.storage.local.set({ dimensionsList: JSON.stringify(allDimensions) });
+        populatePrimaryDimensionDropdown();
+        showMessage({ msg: `Loaded ${allDimensions.length} dimensions (Props & eVars).`, type: "success" });
+      } else {
+        showMessage({ msg: response.error || "Failed to fetch dimensions.", type: "error" });
+        crPrimaryDimension.innerHTML = '<option value="" disabled selected>Failed to load</option>';
+      }
+    },
+  );
+}
+
+function populatePrimaryDimensionDropdown() {
+  crPrimaryDimension.innerHTML = "";
+
+  // Default option
+  const defaultOpt = document.createElement("option");
+  defaultOpt.value = "";
+  defaultOpt.textContent = "Select a dimension";
+  defaultOpt.disabled = true;
+  defaultOpt.selected = true;
+  crPrimaryDimension.appendChild(defaultOpt);
+
+  allDimensions.forEach((dim) => {
+    const opt = document.createElement("option");
+    opt.value = dim.id;
+    opt.textContent = formatDimensionLabel(dim);
+    crPrimaryDimension.appendChild(opt);
+  });
+
+  crPrimaryDimension.disabled = false;
+}
+
+function populateSecondaryDimensionDropdown(excludeDimensionId) {
+  crSecondaryDimension.innerHTML = "";
+
+  // "None" option
+  const noneOpt = document.createElement("option");
+  noneOpt.value = "";
+  noneOpt.textContent = "None (No secondary dimension)";
+  crSecondaryDimension.appendChild(noneOpt);
+
+  allDimensions.forEach((dim) => {
+    if (dim.id === excludeDimensionId) return; // exclude primary
+    const opt = document.createElement("option");
+    opt.value = dim.id;
+    opt.textContent = formatDimensionLabel(dim);
+    crSecondaryDimension.appendChild(opt);
+  });
+
+  crSecondaryDimension.disabled = false;
+}
+
+async function fetchAndPopulatePrimaryValues(dimensionId) {
+  const { selectedCompanyID, selectedrsID } = await chrome.storage.local.get(["selectedCompanyID", "selectedrsID"]);
+
+  if (!selectedCompanyID || !selectedrsID) {
+    showMessage({ msg: "Company and Report Suite not configured.", type: "error" });
+    return;
+  }
+
+  crPrimaryValueSelect.innerHTML = '<option value="" disabled selected>Loading values…</option>';
+  crPrimaryValueSelect.disabled = true;
+
+  chrome.runtime.sendMessage(
+    {
+      action: "FETCH_DIMENSION_VALUES",
+      companyId: selectedCompanyID,
+      rsid: selectedrsID,
+      dimensionId: dimensionId,
+      limit: 50,
+    },
+    async (response) => {
+      if (chrome.runtime.lastError) {
+        showMessage({ msg: "Error fetching dimension values.", type: "error" });
+        return;
+      }
+      if (response.success) {
+        const values = response.values || [];
+        await chrome.storage.local.set({ primaryDimensionValues: JSON.stringify(values) });
+
+        crPrimaryValueSelect.innerHTML = "";
+
+        // Default option
+        const defaultOpt = document.createElement("option");
+        defaultOpt.value = "";
+        defaultOpt.textContent = "Select a value";
+        defaultOpt.disabled = true;
+        defaultOpt.selected = true;
+        crPrimaryValueSelect.appendChild(defaultOpt);
+
+        values.forEach((v) => {
+          const opt = document.createElement("option");
+          opt.value = v.value;
+          opt.textContent = `${v.value} (${v.count.toLocaleString()})`;
+          crPrimaryValueSelect.appendChild(opt);
+        });
+
+        crPrimaryValueSelect.disabled = false;
+
+        if (values.length === 0) {
+          showMessage({ msg: "No values found for selected dimension in the last 30 days.", type: "info" });
+        }
+      } else {
+        showMessage({ msg: response.error || "Failed to fetch dimension values.", type: "error" });
+        crPrimaryValueSelect.innerHTML = '<option value="" disabled selected>Failed to load</option>';
+      }
+    },
+  );
+}
+
+async function fetchAndSaveSecondaryValues(dimensionId) {
+  const { selectedCompanyID, selectedrsID } = await chrome.storage.local.get(["selectedCompanyID", "selectedrsID"]);
+
+  if (!selectedCompanyID || !selectedrsID) return;
+
+  // Show a brief loading message
+  showMessage({ msg: "Fetching secondary dimension values…", type: "info" });
+
+  chrome.runtime.sendMessage(
+    {
+      action: "FETCH_DIMENSION_VALUES",
+      companyId: selectedCompanyID,
+      rsid: selectedrsID,
+      dimensionId: dimensionId,
+      limit: 50,
+    },
+    async (response) => {
+      if (chrome.runtime.lastError) return;
+      if (response.success) {
+        const values = response.values || [];
+        await chrome.storage.local.set({ secondaryDimensionValues: JSON.stringify(values) });
+        showMessage({ msg: `Loaded ${values.length} values for secondary dimension.`, type: "success" });
+      } else {
+        showMessage({ msg: response.error || "Failed to fetch secondary dimension values.", type: "error" });
+      }
+    },
+  );
+}
+
+// ---------- Populate Step 4 on page load ----------
+
+async function populateCustomReportFields() {
+  const { customReportConfig } = await chrome.storage.local.get(["customReportConfig"]);
+
+  if (!customReportConfig || !customReportConfig.enabled) {
+    step4.style.display = "block";
+    return;
+  }
+
+  step4.style.display = "block";
+  enableCustomReportCheckbox.checked = true;
+  customReportConfigDiv.style.display = "block";
+
+  // Load dimensions first
+  await loadDimensionsIfNeeded();
+
+  // Wait a tick for dropdown to populate
+  await new Promise((r) => setTimeout(r, 100));
+
+  // Restore primary dimension
+  if (customReportConfig.primaryDimension?.id) {
+    crPrimaryDimension.value = customReportConfig.primaryDimension.id;
+
+    // Populate primary values
+    await fetchAndPopulatePrimaryValues(customReportConfig.primaryDimension.id);
+    await new Promise((r) => setTimeout(r, 500)); // wait for values to load
+
+    // Restore primary value
+    if (customReportConfig.primaryValue) {
+      // Try setting from dropdown
+      crPrimaryValueSelect.value = customReportConfig.primaryValue;
+      // If not found in dropdown (custom value), put it in the text input
+      if (!crPrimaryValueSelect.value) {
+        crPrimaryValueCustom.value = customReportConfig.primaryValue;
+      }
+    }
+
+    // Populate secondary dropdown
+    populateSecondaryDimensionDropdown(customReportConfig.primaryDimension.id);
+  }
+
+  // Restore match condition
+  if (customReportConfig.primaryMatch) {
+    crPrimaryMatch.value = customReportConfig.primaryMatch;
+  }
+
+  // Restore secondary dimension
+  if (customReportConfig.secondaryDimension?.id) {
+    await new Promise((r) => setTimeout(r, 100));
+    crSecondaryDimension.value = customReportConfig.secondaryDimension.id;
+  }
+}
 
 chrome.runtime.onMessage.addListener(async (msg, sender, sendResponse) => {
   if (msg.type == "RECHECK_TOKEN_STATUS") {

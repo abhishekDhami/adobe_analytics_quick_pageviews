@@ -139,6 +139,16 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     chrome.storage.local.set({ datePreset: msg.datePreset }, () => {
       sendResponse({ success: true });
     });
+  } else if (msg.action === "FETCH_DIMENSIONS") {
+    fetchDimensions(msg.companyId, msg.rsid).then((resp) => {
+      sendResponse(resp);
+    });
+    return true;
+  } else if (msg.action === "FETCH_DIMENSION_VALUES") {
+    fetchDimensionValues(msg.companyId, msg.rsid, msg.dimensionId, msg.limit).then((resp) => {
+      sendResponse(resp);
+    });
+    return true;
   }
   return true;
 });
@@ -681,6 +691,142 @@ async function refreshAccessToken(refreshToken) {
   } catch (error) {
     console.log("Error refreshing access token:", error);
     return { reauthenticate: true };
+  }
+}
+
+// --------------------
+// 📊 Dimensions & Values API
+// --------------------
+
+// Fetch all props and eVars for a report suite
+async function fetchDimensions(companyId, rsid) {
+  try {
+    let tokenResponse = await getValidAccessToken();
+    if (tokenResponse.success !== true) {
+      return tokenResponse;
+    }
+    let accessToken = tokenResponse.accessToken;
+    const { client_id } = await chrome.storage.local.get(["client_id"]);
+
+    const resp = await fetch(
+      `${reportingAPIURL}/${companyId}/dimensions?rsid=${encodeURIComponent(rsid)}&locale=en_US&expansion=tags`,
+      {
+        headers: {
+          Authorization: `Bearer ${accessToken}`,
+          "x-api-key": client_id,
+          "x-proxy-global-company-id": companyId,
+          Accept: "application/json",
+        },
+      },
+    );
+
+    const data = await resp.json();
+
+    if (data.error_code) {
+      return { error: data.message || "Failed to fetch dimensions.", success: false };
+    }
+
+    // Filter to only props and eVars
+    const filtered = data
+      .filter((dim) => {
+        const id = dim.id || "";
+        return id.startsWith("variables/prop") || id.startsWith("variables/evar");
+      })
+      .map((dim) => ({
+        id: dim.id, // e.g., "variables/prop1", "variables/evar5"
+        name: dim.name || "", // friendly name configured in report suite
+        type: dim.id.includes("prop") ? "prop" : "evar",
+      }))
+      .sort((a, b) => {
+        // Sort: props first then eVars, numerically within each group
+        if (a.type !== b.type) return a.type === "prop" ? -1 : 1;
+        const numA = parseInt(a.id.replace(/\D/g, "")) || 0;
+        const numB = parseInt(b.id.replace(/\D/g, "")) || 0;
+        return numA - numB;
+      });
+
+    return { dimensions: filtered, success: true };
+  } catch (error) {
+    console.log("Error fetching dimensions:", error);
+    return { error: "Failed to fetch dimensions.", success: false };
+  }
+}
+
+// Fetch top N values for a specific dimension (last 30 days)
+async function fetchDimensionValues(companyId, rsid, dimensionId, limit = 50) {
+  try {
+    let tokenResponse = await getValidAccessToken();
+    if (tokenResponse.success !== true) {
+      return tokenResponse;
+    }
+    let accessToken = tokenResponse.accessToken;
+    const { client_id } = await chrome.storage.local.get(["client_id"]);
+
+    // Calculate last 30 days date range
+    const today = new Date();
+    const endDate = new Date(today);
+    endDate.setDate(today.getDate() + 1);
+    const startDate = new Date(today);
+    startDate.setDate(today.getDate() - 29);
+    const formatDate = (d) => d.toISOString().split("T")[0];
+    const dateRangeString = `${formatDate(startDate)}T00:00:00.000/${formatDate(endDate)}T00:00:00.000`;
+
+    const reportReq = {
+      rsid: rsid,
+      globalFilters: [
+        {
+          type: "dateRange",
+          dateRange: dateRangeString,
+        },
+      ],
+      metricContainer: {
+        metrics: [
+          {
+            id: "metrics/occurrences",
+            columnId: "0",
+            sort: "desc",
+          },
+        ],
+      },
+      dimension: dimensionId,
+      settings: {
+        limit: limit,
+        dimensionSort: "desc",
+        countRepeatInstances: true,
+      },
+    };
+
+    const finalReportURL = `${reportingAPIURL}/${companyId}/reports`;
+
+    const resp = await fetch(finalReportURL, {
+      method: "POST",
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "x-api-key": client_id,
+        Accept: "application/json",
+        "Content-Type": "application/json",
+      },
+      body: JSON.stringify(reportReq),
+    });
+
+    const reportData = await resp.json();
+
+    if (reportData.error_code) {
+      return { error: reportData.message || "Failed to fetch dimension values.", success: false };
+    }
+
+    const rows = reportData?.rows || [];
+    const values = rows
+      .filter((row) => row.value && row.value !== "Unspecified" && row.value !== "")
+      .map((row) => ({
+        value: row.value,
+        count: row.data?.[0] || 0,
+      }));
+
+    return { values: values, success: true };
+  } catch (error) {
+    console.log("Error fetching dimension values:", error);
+    return { error: "Failed to fetch dimension values.", success: false };
   }
 }
 

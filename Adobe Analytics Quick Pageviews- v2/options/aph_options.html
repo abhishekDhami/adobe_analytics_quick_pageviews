@@ -367,6 +367,23 @@
             display: none !important;
         }
 
+        /* Small inline spinner for loading states */
+        .inline-spinner {
+            display: inline-block;
+            width: 14px;
+            height: 14px;
+            border: 2px solid #333;
+            border-top-color: var(--accent);
+            border-radius: 50%;
+            animation: opt-spin 0.6s linear infinite;
+            vertical-align: middle;
+            margin-left: 6px;
+        }
+
+        @keyframes opt-spin {
+            to { transform: rotate(360deg); }
+        }
+
         /* Toggle switch */
         .switch {
             position: relative;
@@ -724,6 +741,73 @@
                 <div class="btn-row">
                     <button id="saveConfigBtn">Save Configuration</button>
                     <button id="clearConfigBtn" class="btn-clear">Clear Configuration</button>
+                </div>
+            </div>
+
+            <!-- Step 4: Custom Report panel -->
+            <div id="step4" class="step panel" style="display:none;">
+                <h3>Step 4: Custom Report <span style="font-size:12px; color:var(--muted); font-weight:400;">(Optional)</span></h3>
+                <p style="font-size:13px; color:var(--muted); margin:6px 0 12px;">
+                    Configure a custom report filter to view metrics for a specific dimension value (e.g., a property or platform) in the widget's expanded view.
+                </p>
+
+                <label style="margin-top:4px;">
+                    <input type="checkbox" id="enableCustomReport" />
+                    Enable Custom Report
+                </label>
+
+                <!-- Custom Report Config (hidden until checkbox is checked) -->
+                <div id="customReportConfig" style="display:none;">
+
+                    <hr style="border-color: rgba(255,255,255,0.06); margin: 14px 0;" />
+
+                    <!-- Primary Dimension -->
+                    <label for="crPrimaryDimension">Primary Dimension:
+                        <span class="info-icon"
+                            title="Select a prop or eVar to use as the main filter for the custom report. This acts as a global filter on the widget.">i</span>
+                    </label>
+                    <select id="crPrimaryDimension" disabled>
+                        <option value="" disabled selected>Loading dimensions…</option>
+                    </select>
+
+                    <!-- Match Condition -->
+                    <label for="crPrimaryMatch">Match Condition:
+                        <span class="info-icon"
+                            title="Choose how the primary dimension value should be matched.">i</span>
+                    </label>
+                    <select id="crPrimaryMatch">
+                        <option value="exact">Equals</option>
+                        <option value="contains">Contains</option>
+                    </select>
+
+                    <!-- Primary Value -->
+                    <label for="crPrimaryValue">Primary Value:
+                        <span class="info-icon"
+                            title="Select a value from the top 50 values (last 30 days) or type a custom value.">i</span>
+                    </label>
+                    <div style="display:flex; gap:8px; align-items:stretch;">
+                        <select id="crPrimaryValueSelect" disabled style="flex:1;">
+                            <option value="" disabled selected>Select primary dimension first</option>
+                        </select>
+                        <input type="text" id="crPrimaryValueCustom" placeholder="Or type custom value"
+                            style="flex:1;" />
+                    </div>
+
+                    <hr style="border-color: rgba(255,255,255,0.06); margin: 14px 0;" />
+
+                    <!-- Secondary Dimension -->
+                    <label for="crSecondaryDimension">Secondary Dimension:
+                        <span class="info-icon"
+                            title="Select a secondary dimension for sub-filtering in the widget (e.g., Platform, Device Type). Must be different from the primary dimension.">i</span>
+                    </label>
+                    <select id="crSecondaryDimension" disabled>
+                        <option value="" disabled selected>Select primary dimension first</option>
+                    </select>
+
+                    <div class="btn-row">
+                        <button id="saveCustomReportBtn">Save Custom Report</button>
+                        <button id="clearCustomReportBtn" class="btn-clear">Clear Custom Report</button>
+                    </div>
                 </div>
             </div>
 
