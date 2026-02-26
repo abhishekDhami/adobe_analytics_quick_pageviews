@@ -91,16 +91,13 @@ function getSavedDatePreset() {
 
 function saveDatePreset(preset) {
   return new Promise((resolve) => {
-    chrome.runtime.sendMessage(
-      { action: "SET_DATE_PRESET", datePreset: preset },
-      (response) => {
-        if (chrome.runtime.lastError) {
-          resolve();
-          return;
-        }
+    chrome.runtime.sendMessage({ action: "SET_DATE_PRESET", datePreset: preset }, (response) => {
+      if (chrome.runtime.lastError) {
         resolve();
-      },
-    );
+        return;
+      }
+      resolve();
+    });
   });
 }
 
@@ -118,15 +115,11 @@ function formatLargeNumber(num) {
   if (num < 0) return "-" + formatLargeNumber(Math.abs(num));
   if (num >= 1_000_000_000) {
     const val = num / 1_000_000_000;
-    return val % 1 === 0
-      ? val.toFixed(0) + "B"
-      : val.toFixed(2).replace(/\.?0+$/, "") + "B";
+    return val % 1 === 0 ? val.toFixed(0) + "B" : val.toFixed(2).replace(/\.?0+$/, "") + "B";
   }
   if (num >= 1_000_000) {
     const val = num / 1_000_000;
-    return val % 1 === 0
-      ? val.toFixed(0) + "M"
-      : val.toFixed(2).replace(/\.?0+$/, "") + "M";
+    return val % 1 === 0 ? val.toFixed(0) + "M" : val.toFixed(2).replace(/\.?0+$/, "") + "M";
   }
   return num.toLocaleString();
 }
@@ -557,6 +550,27 @@ async function loadWidgetOnThePage() {
       color: #fff;
     }
 
+    .header-action-btn {
+      background: transparent;
+      border: none;
+      color: #888;
+      font-size: 13px;
+      cursor: pointer;
+      padding: 2px 4px;
+      border-radius: 3px;
+      transition: color 0.15s, background 0.15s;
+      line-height: 1;
+    }
+
+    .header-action-btn:hover {
+      color: #75c8bb;
+      background: rgba(117, 200, 187, 0.1);
+    }
+
+    .header-action-btn.spinning {
+      animation: spin 0.7s linear infinite;
+    }
+
     /* smooth content appearance */
     .expanded-section {
       opacity: 0;
@@ -836,6 +850,8 @@ async function loadWidgetOnThePage() {
               <option value="3m">Last 3 Months</option>
               <option value="6m">Last 6 Months</option>
             </select>
+            <button id="refreshBtn" class="header-action-btn" title="Refresh data">&#x21bb;</button>
+            <button id="exportCsvBtn" class="header-action-btn" title="Export to CSV">&#x2913;</button>
             <button id="collapseBtn" class="collapse-btn">✕</button>
           </div>
         </div>
@@ -961,6 +977,8 @@ async function loadWidgetOnThePage() {
   const reauthBtn = shadow.getElementById("reauthenticateBtn");
   const moreBtn = shadow.getElementById("moreBtn");
   const collapseBtn = shadow.getElementById("collapseBtn");
+  const refreshBtn = shadow.getElementById("refreshBtn");
+  const exportCsvBtn = shadow.getElementById("exportCsvBtn");
   const datePresetSelect = shadow.getElementById("datePresetSelect");
   const loadingOverlay = shadow.getElementById("loadingOverlay");
 
@@ -968,15 +986,19 @@ async function loadWidgetOnThePage() {
   const tabPagePerf = shadow.getElementById("tabPagePerf");
   const tabCustomReport = shadow.getElementById("tabCustomReport");
   const tabContentPagePerf = shadow.getElementById("tabContentPagePerf");
-  const tabContentCustomReport = shadow.getElementById(
-    "tabContentCustomReport",
-  );
+  const tabContentCustomReport = shadow.getElementById("tabContentCustomReport");
   const crSecondarySelect = shadow.getElementById("crSecondarySelect");
 
   // Custom report chart instances (separate from page perf)
   let crChartInstances = {};
   let customReportConfig = null;
   let crSecondaryValues = [];
+
+  // Store last fetched data for export
+  let lastPagePerfData = null;
+  let lastPagePerfCountryData = null;
+  let lastCrData = null;
+  let lastCrCountryData = null;
 
   function showLoading() {
     if (loadingOverlay) loadingOverlay.classList.add("active");
@@ -1029,10 +1051,7 @@ async function loadWidgetOnThePage() {
           await loadCustomReportTab();
           // Restore active tab
           const savedTab = sessionStorage.getItem("adobePVExtensionActiveTab");
-          if (
-            savedTab === "customReport" &&
-            !tabCustomReport.classList.contains("disabled")
-          ) {
+          if (savedTab === "customReport" && !tabCustomReport.classList.contains("disabled")) {
             switchTab("customReport");
             await fetchAndRenderCustomReport();
           }
@@ -1086,10 +1105,7 @@ async function loadWidgetOnThePage() {
     sessionStorage.setItem("adobePVExtensionViewMode", "expanded");
     showLoading();
     let resp = await checkToken();
-    if (!resp) {
-      hideLoading();
-      return;
-    }
+    if (!resp) { hideLoading(); return; }
     const pageData = await getPageData(currentDatePreset);
     const countryData = await getCountryData(currentDatePreset);
     hideLoading();
@@ -1155,6 +1171,106 @@ async function loadWidgetOnThePage() {
     await fetchAndRenderCustomReport();
   });
 
+  /* ---------- Refresh Button ---------- */
+  refreshBtn.addEventListener("click", async () => {
+    refreshBtn.classList.add("spinning");
+    showLoading();
+    let resp = await checkToken();
+    if (!resp) {
+      hideLoading();
+      refreshBtn.classList.remove("spinning");
+      return;
+    }
+
+    if (tabContentCustomReport.classList.contains("active")) {
+      // Refresh custom report tab
+      await fetchAndRenderCustomReport();
+    } else {
+      // Refresh page performance tab
+      const pageData = await getPageData(currentDatePreset);
+      const countryData = await getCountryData(currentDatePreset);
+      hideLoading();
+      if (pageData && countryData) {
+        renderMetrics(pageData);
+        updateChartTitles();
+        renderCharts(pageData, countryData);
+        updateFilterCondition();
+      }
+    }
+    refreshBtn.classList.remove("spinning");
+  });
+
+  /* ---------- Export CSV Button ---------- */
+  exportCsvBtn.addEventListener("click", () => {
+    let csvContent = "";
+    let filename = "";
+
+    if (tabContentCustomReport.classList.contains("active")) {
+      // Export custom report data
+      if (!lastCrData) {
+        statusEl.textContent = "No data to export.";
+        return;
+      }
+      csvContent = buildCsvContent(lastCrData, lastCrCountryData, "Custom Report");
+      filename = `custom_report_${currentDatePreset}_${new Date().toISOString().split("T")[0]}.csv`;
+    } else {
+      // Export page performance data
+      if (!lastPagePerfData) {
+        statusEl.textContent = "No data to export.";
+        return;
+      }
+      csvContent = buildCsvContent(lastPagePerfData, lastPagePerfCountryData, "Page Performance");
+      filename = `page_performance_${currentDatePreset}_${new Date().toISOString().split("T")[0]}.csv`;
+    }
+
+    // Download via Blob + anchor
+    const blob = new Blob([csvContent], { type: "text/csv;charset=utf-8;" });
+    const url = URL.createObjectURL(blob);
+    const a = document.createElement("a");
+    a.href = url;
+    a.download = filename;
+    a.style.display = "none";
+    document.body.appendChild(a);
+    a.click();
+    document.body.removeChild(a);
+    URL.revokeObjectURL(url);
+  });
+
+  function buildCsvContent(pageData, countryData, reportName) {
+    let csv = "";
+
+    // Header section
+    csv += `${reportName} - ${DATE_PRESET_LABELS[currentDatePreset] || currentDatePreset}\n`;
+    csv += `Exported: ${new Date().toLocaleString()}\n\n`;
+
+    // Totals
+    const totalPV = pageData.filteredTotals?.[0] || 0;
+    const totalVisits = pageData.filteredTotals?.[1] || 0;
+    const totalVisitors = pageData.filteredTotals?.[2] || 0;
+    csv += `Total Pageviews,Total Visits,Total Visitors\n`;
+    csv += `${totalPV},${totalVisits},${totalVisitors}\n\n`;
+
+    // Trend data
+    csv += `Date,Pageviews,Visits,Visitors\n`;
+    const dates = pageData.dates || [];
+    const pvs = pageData.pageViews || [];
+    const visits = pageData.visits || [];
+    const visitors = pageData.visitors || [];
+    for (let i = 0; i < dates.length; i++) {
+      csv += `${dates[i]},${pvs[i] || 0},${visits[i] || 0},${visitors[i] || 0}\n`;
+    }
+
+    // Country data
+    if (countryData && countryData.countries && countryData.countries.length > 0) {
+      csv += `\nCountry,Traffic Share (%)\n`;
+      for (let i = 0; i < countryData.countries.length; i++) {
+        csv += `${countryData.countries[i]},${countryData.pageViews[i] || 0}\n`;
+      }
+    }
+
+    return csv;
+  }
+
   /* ---------- Date Preset Change ---------- */
   datePresetSelect.addEventListener("change", async (e) => {
     currentDatePreset = e.target.value;
@@ -1164,10 +1280,7 @@ async function loadWidgetOnThePage() {
     showLoading();
     statusEl.textContent = "";
     let resp = await checkToken();
-    if (!resp) {
-      hideLoading();
-      return;
-    }
+    if (!resp) { hideLoading(); return; }
 
     const pageData = await getPageData(currentDatePreset);
     const countryData = await getCountryData(currentDatePreset);
@@ -1232,9 +1345,7 @@ async function loadWidgetOnThePage() {
     ev.preventDefault();
     startDrag(ev.clientX, ev.clientY);
   });
-  document.addEventListener("mousemove", (ev) =>
-    doDrag(ev.clientX, ev.clientY),
-  );
+  document.addEventListener("mousemove", (ev) => doDrag(ev.clientX, ev.clientY));
   document.addEventListener("mouseup", stopDrag);
 
   // touch events
@@ -1260,14 +1371,11 @@ async function loadWidgetOnThePage() {
 
   // ---------- reauthBtn Click handler ----------
   reauthBtn.addEventListener("click", () => {
-    chrome.runtime.sendMessage(
-      { action: "OPEN_EXTENSION_OPTION" },
-      (response) => {
-        if (chrome.runtime.lastError) {
-          return;
-        }
-      },
-    );
+    chrome.runtime.sendMessage({ action: "OPEN_EXTENSION_OPTION" }, (response) => {
+      if (chrome.runtime.lastError) {
+        return;
+      }
+    });
   });
 
   // ---------- Checking Token validity ----------
@@ -1286,19 +1394,16 @@ async function loadWidgetOnThePage() {
 
   async function checkTokenValidity() {
     return new Promise((resolve) => {
-      chrome.runtime.sendMessage(
-        { action: "GET_TOKEN_VALIDITY" },
-        (response) => {
-          if (response && response.success) {
-            resolve(true);
-          } else {
-            resolve(false);
-          }
-          if (chrome.runtime.lastError) {
-            return;
-          }
-        },
-      );
+      chrome.runtime.sendMessage({ action: "GET_TOKEN_VALIDITY" }, (response) => {
+        if (response && response.success) {
+          resolve(true);
+        } else {
+          resolve(false);
+        }
+        if (chrome.runtime.lastError) {
+          return;
+        }
+      });
     });
   }
 
@@ -1317,31 +1422,24 @@ async function loadWidgetOnThePage() {
 
   async function fetchPageIdentifiers() {
     return new Promise((resolve, reject) => {
-      chrome.runtime.sendMessage(
-        { action: "GET_PAGE_IDENTIFIERS" },
-        (response) => {
-          if (response.pageIdentifier && response.success) {
-            pageIdentifier = response.pageIdentifier;
-            if (pageIdentifier.source == "url") {
-              pageIdentifier.value = window.location.href;
-              resolve({ success: true, pageIdentifier: pageIdentifier });
-            } else if (pageIdentifier.source == "title") {
-              pageIdentifier.value = document.title;
-              resolve({ success: true, pageIdentifier: pageIdentifier });
-            } else if (pageIdentifier.source == "window") {
-              window.dispatchEvent(
-                new CustomEvent("fetchPageWindowPathIdentifiers", {
-                  detail: pageIdentifier,
-                }),
-              );
-              resolve({});
-            }
-          } else {
-            resolve({ success: false, pageIdentifier: {} });
+      chrome.runtime.sendMessage({ action: "GET_PAGE_IDENTIFIERS" }, (response) => {
+        if (response.pageIdentifier && response.success) {
+          pageIdentifier = response.pageIdentifier;
+          if (pageIdentifier.source == "url") {
+            pageIdentifier.value = window.location.href;
+            resolve({ success: true, pageIdentifier: pageIdentifier });
+          } else if (pageIdentifier.source == "title") {
+            pageIdentifier.value = document.title;
+            resolve({ success: true, pageIdentifier: pageIdentifier });
+          } else if (pageIdentifier.source == "window") {
+            window.dispatchEvent(new CustomEvent("fetchPageWindowPathIdentifiers", { detail: pageIdentifier }));
+            resolve({});
           }
-          return true;
-        },
-      );
+        } else {
+          resolve({ success: false, pageIdentifier: {} });
+        }
+        return true;
+      });
     });
   }
 
@@ -1352,10 +1450,7 @@ async function loadWidgetOnThePage() {
     statusEl.textContent = "";
 
     // Minimal view always uses "7d" preset for today/yesterday
-    const [pageData, countryData] = await Promise.all([
-      getPageData("7d"),
-      getCountryData("7d"),
-    ]);
+    const [pageData, countryData] = await Promise.all([getPageData("7d"), getCountryData("7d")]);
     if (!pageData || !countryData) {
       hideLoading();
       statusEl.textContent = "No data available for this page.";
@@ -1426,13 +1521,7 @@ async function loadWidgetOnThePage() {
 
   function updateChartTitles() {
     const presetLabel = DATE_PRESET_LABELS[currentDatePreset] || "Last 7 Days";
-    const shortLabels = {
-      "7d": "7d",
-      "3w": "3w",
-      "5w": "5w",
-      "3m": "3m",
-      "6m": "6m",
-    };
+    const shortLabels = { "7d": "7d", "3w": "3w", "5w": "5w", "3m": "3m", "6m": "6m" };
     const shortLabel = shortLabels[currentDatePreset] || "7d";
     const pvTitle = badge.querySelector("#pvChartTitle");
     const visitsTitle = badge.querySelector("#visitsChartTitle");
@@ -1668,44 +1757,27 @@ async function loadWidgetOnThePage() {
   function renderCharts(pageData, countryData) {
     if (!pageData || !countryData) return;
 
+    // Store for CSV export
+    lastPagePerfData = pageData;
+    lastPagePerfCountryData = countryData;
+
     const root = badge;
     const granularity = pageData.granularity || "day";
 
-    createVerticalChart(
-      root.querySelector("#pvChart"),
-      pageData.dates,
-      pageData.pageViews,
-      granularity,
-    );
+    createVerticalChart(root.querySelector("#pvChart"), pageData.dates, pageData.pageViews, granularity);
 
-    createVerticalChart(
-      root.querySelector("#visitsChart"),
-      pageData.dates,
-      pageData.visits,
-      granularity,
-    );
+    createVerticalChart(root.querySelector("#visitsChart"), pageData.dates, pageData.visits, granularity);
 
-    createVerticalChart(
-      root.querySelector("#uvChart"),
-      pageData.dates,
-      pageData.visitors,
-      granularity,
-    );
+    createVerticalChart(root.querySelector("#uvChart"), pageData.dates, pageData.visitors, granularity);
 
-    createHorizontalChart(
-      root.querySelector("#countryChart"),
-      countryData.countries,
-      countryData.pageViews,
-    );
+    createHorizontalChart(root.querySelector("#countryChart"), countryData.countries, countryData.pageViews);
   }
 
   async function updateFilterCondition() {
     const el = badge.querySelector("#filterCondition");
     if (!el) return;
 
-    const { pageIdentifierCondition } = await chrome.storage.local.get(
-      "pageIdentifierCondition",
-    );
+    const { pageIdentifierCondition } = await chrome.storage.local.get("pageIdentifierCondition");
 
     if (!pageIdentifierCondition) {
       el.textContent = "";
@@ -1721,16 +1793,10 @@ async function loadWidgetOnThePage() {
   // =============================================
 
   async function loadCustomReportTab() {
-    const { customReportConfig: config } =
-      await chrome.storage.local.get("customReportConfig");
+    const { customReportConfig: config } = await chrome.storage.local.get("customReportConfig");
     customReportConfig = config;
 
-    if (
-      !config ||
-      !config.enabled ||
-      !config.primaryDimension?.id ||
-      !config.primaryValue
-    ) {
+    if (!config || !config.enabled || !config.primaryDimension?.id || !config.primaryValue) {
       // Disable custom report tab
       tabCustomReport.classList.add("disabled");
       tabCustomReport.classList.remove("active");
@@ -1757,8 +1823,7 @@ async function loadWidgetOnThePage() {
     const filterSep = badge.querySelector(".cr-filter-sep");
     if (config.secondaryDimension?.id) {
       // Build label like "Prop3 - Platform"
-      const secDisplay =
-        config.secondaryDimension.displayLabel || config.secondaryDimension.id;
+      const secDisplay = config.secondaryDimension.displayLabel || config.secondaryDimension.id;
       if (secondaryLabel) secondaryLabel.textContent = `${secDisplay}:`;
       if (filterSep) filterSep.style.display = "inline";
       crSecondarySelect.style.display = "inline-block";
@@ -1772,9 +1837,7 @@ async function loadWidgetOnThePage() {
   }
 
   async function populateSecondaryDropdown() {
-    const { secondaryDimensionValues } = await chrome.storage.local.get(
-      "secondaryDimensionValues",
-    );
+    const { secondaryDimensionValues } = await chrome.storage.local.get("secondaryDimensionValues");
     crSecondarySelect.innerHTML = "";
 
     // "No Filter" option
@@ -1803,10 +1866,7 @@ async function loadWidgetOnThePage() {
 
     showLoading();
     let resp = await checkToken();
-    if (!resp) {
-      hideLoading();
-      return;
-    }
+    if (!resp) { hideLoading(); return; }
 
     const customFilters = {
       primaryDimension: customReportConfig.primaryDimension.id,
@@ -1817,8 +1877,7 @@ async function loadWidgetOnThePage() {
     // Add secondary filter if selected
     const secondaryValue = crSecondarySelect.value;
     if (secondaryValue && customReportConfig.secondaryDimension?.id) {
-      customFilters.secondaryDimension =
-        customReportConfig.secondaryDimension.id;
+      customFilters.secondaryDimension = customReportConfig.secondaryDimension.id;
       customFilters.secondaryValue = secondaryValue;
     }
 
@@ -1856,6 +1915,10 @@ async function loadWidgetOnThePage() {
   }
 
   function renderCustomReportCharts(pageData, countryData) {
+    // Store for CSV export
+    lastCrData = pageData;
+    lastCrCountryData = countryData;
+
     const root = badge;
     const granularity = pageData?.granularity || "day";
 
@@ -1864,47 +1927,18 @@ async function loadWidgetOnThePage() {
     crChartInstances = {};
 
     if (pageData) {
-      createVerticalChart(
-        root.querySelector("#crPvChart"),
-        pageData.dates,
-        pageData.pageViews,
-        granularity,
-        crChartInstances,
-      );
-      createVerticalChart(
-        root.querySelector("#crVisitsChart"),
-        pageData.dates,
-        pageData.visits,
-        granularity,
-        crChartInstances,
-      );
-      createVerticalChart(
-        root.querySelector("#crUvChart"),
-        pageData.dates,
-        pageData.visitors,
-        granularity,
-        crChartInstances,
-      );
+      createVerticalChart(root.querySelector("#crPvChart"), pageData.dates, pageData.pageViews, granularity, crChartInstances);
+      createVerticalChart(root.querySelector("#crVisitsChart"), pageData.dates, pageData.visits, granularity, crChartInstances);
+      createVerticalChart(root.querySelector("#crUvChart"), pageData.dates, pageData.visitors, granularity, crChartInstances);
     }
 
     if (countryData) {
-      createHorizontalChart(
-        root.querySelector("#crCountryChart"),
-        countryData.countries,
-        countryData.pageViews,
-        crChartInstances,
-      );
+      createHorizontalChart(root.querySelector("#crCountryChart"), countryData.countries, countryData.pageViews, crChartInstances);
     }
   }
 
   function updateCrChartTitles() {
-    const shortLabels = {
-      "7d": "7d",
-      "3w": "3w",
-      "5w": "5w",
-      "3m": "3m",
-      "6m": "6m",
-    };
+    const shortLabels = { "7d": "7d", "3w": "3w", "5w": "5w", "3m": "3m", "6m": "6m" };
     const shortLabel = shortLabels[currentDatePreset] || "7d";
     const pvTitle = badge.querySelector("#crPvChartTitle");
     const visitsTitle = badge.querySelector("#crVisitsChartTitle");
@@ -1923,60 +1957,38 @@ async function loadWidgetOnThePage() {
 
 function getPageData(datePreset = "7d") {
   return new Promise((resolve, reject) => {
-    chrome.runtime.sendMessage(
-      {
-        action: "GET_REPORT",
-        pageIdentifier: pageIdentifier,
-        reportType: "pageViews",
-        datePreset: datePreset,
-      },
-      (response) => {
-        if (chrome.runtime.lastError) {
-          resolve(null);
-          return;
-        }
-        if (response.success) {
-          response.reportData.dates = response.reportData.dates.map(
-            (dt) => dt.split(",")[0],
-          );
-          resolve(response.reportData);
-        } else {
-          resolve(null);
-        }
-      },
-    );
+    chrome.runtime.sendMessage({ action: "GET_REPORT", pageIdentifier: pageIdentifier, reportType: "pageViews", datePreset: datePreset }, (response) => {
+      if (chrome.runtime.lastError) {
+        resolve(null);
+        return;
+      }
+      if (response.success) {
+        response.reportData.dates = response.reportData.dates.map((dt) => dt.split(",")[0]);
+        resolve(response.reportData);
+      } else {
+        resolve(null);
+      }
+    });
   });
 }
 
 function getCountryData(datePreset = "7d") {
   return new Promise((resolve, reject) => {
-    chrome.runtime.sendMessage(
-      {
-        action: "GET_REPORT",
-        pageIdentifier: pageIdentifier,
-        reportType: "countryData",
-        datePreset: datePreset,
-      },
-      (response) => {
-        if (chrome.runtime.lastError) {
-          resolve(null);
-          return;
-        }
-        if (response.success) {
-          resolve(response.reportData);
-        } else {
-          resolve(null);
-        }
-      },
-    );
+    chrome.runtime.sendMessage({ action: "GET_REPORT", pageIdentifier: pageIdentifier, reportType: "countryData", datePreset: datePreset }, (response) => {
+      if (chrome.runtime.lastError) {
+        resolve(null);
+        return;
+      }
+      if (response.success) {
+        resolve(response.reportData);
+      } else {
+        resolve(null);
+      }
+    });
   });
 }
 
-function getCustomReportData(
-  reportType = "pageViews",
-  datePreset = "7d",
-  customFilters = {},
-) {
+function getCustomReportData(reportType = "pageViews", datePreset = "7d", customFilters = {}) {
   return new Promise((resolve, reject) => {
     chrome.runtime.sendMessage(
       {
@@ -1993,9 +2005,7 @@ function getCustomReportData(
         }
         if (response && response.success) {
           if (reportType === "pageViews" && response.reportData?.dates) {
-            response.reportData.dates = response.reportData.dates.map(
-              (dt) => dt.split(",")[0],
-            );
+            response.reportData.dates = response.reportData.dates.map((dt) => dt.split(",")[0]);
           }
           resolve(response.reportData);
         } else {
@@ -2008,19 +2018,16 @@ function getCustomReportData(
 
 async function getEnableOnPageFlag() {
   return new Promise((resolve) => {
-    chrome.runtime.sendMessage(
-      { action: "GET_ENABLED_ON_PAGE_FLAG" },
-      (response) => {
-        if (response && typeof response.isEnabled === "boolean") {
-          resolve(response.isEnabled);
-        } else {
-          resolve(false);
-        }
-        if (chrome.runtime.lastError) {
-          return;
-        }
-      },
-    );
+    chrome.runtime.sendMessage({ action: "GET_ENABLED_ON_PAGE_FLAG" }, (response) => {
+      if (response && typeof response.isEnabled === "boolean") {
+        resolve(response.isEnabled);
+      } else {
+        resolve(false);
+      }
+      if (chrome.runtime.lastError) {
+        return;
+      }
+    });
   });
 }
 
