@@ -298,6 +298,35 @@ async function loadWidgetOnThePage() {
     .toggle-wrap {
       display:flex;
       align-items:center;
+      gap: 6px;
+    }
+
+    .header-icon-btn {
+      background: transparent;
+      border: none;
+      color: #777;
+      font-size: 14px;
+      cursor: pointer;
+      padding: 2px;
+      line-height: 1;
+      transition: color 0.15s;
+    }
+
+    .header-icon-btn:hover {
+      color: #75c8bb;
+    }
+
+    .feedback-link {
+      font-size: 10px;
+      color: #666;
+      text-decoration: none;
+      cursor: pointer;
+      transition: color 0.15s;
+    }
+
+    .feedback-link:hover {
+      color: #75c8bb;
+      text-decoration: underline;
     }
 
     /* small toggle switch */
@@ -611,7 +640,8 @@ async function loadWidgetOnThePage() {
     /* Data delay disclaimer footer */
     .delay-disclaimer {
       display: flex;
-      justify-content: flex-end;
+      justify-content: space-between;
+      align-items: center;
       font-size: 10px;
       color: #8a8a8a;
       padding: 0 2px 4px;
@@ -655,7 +685,7 @@ async function loadWidgetOnThePage() {
     .tab-btn.disabled {
       color: #555;
       cursor: not-allowed;
-      opacity: 1;
+      opacity: 0.6;
     }
 
     .tab-btn-tooltip {
@@ -804,6 +834,7 @@ async function loadWidgetOnThePage() {
         </span>
       </div>
       <div class="toggle-wrap">
+        <button class="header-icon-btn" id="settingsBtn" title="Open Settings">&#x2699;</button>
         <label class="switch" title="Show analytics">
           <input type="checkbox" id="expandToggle" />
           <span class="slider"></span>
@@ -962,6 +993,7 @@ async function loadWidgetOnThePage() {
 
         <div class="delay-disclaimer">
           <span>Data is not real-time and may have a delay of ~1 hour.</span>
+          <a class="feedback-link" id="feedbackLink" title="Share your feedback on Chrome Web Store">Feedback &#x2197;</a>
         </div>
 
       </div>
@@ -986,6 +1018,8 @@ async function loadWidgetOnThePage() {
   const collapseBtn = shadow.getElementById("collapseBtn");
   const refreshBtn = shadow.getElementById("refreshBtn");
   const exportCsvBtn = shadow.getElementById("exportCsvBtn");
+  const settingsBtn = shadow.getElementById("settingsBtn");
+  const feedbackLink = shadow.getElementById("feedbackLink");
   const datePresetSelect = shadow.getElementById("datePresetSelect");
   const loadingOverlay = shadow.getElementById("loadingOverlay");
 
@@ -1102,6 +1136,21 @@ async function loadWidgetOnThePage() {
       sessionStorage.removeItem("adobePVExtensionViewMode");
       body.setAttribute("aria-hidden", "true");
     }
+  });
+
+  /* ---------- Settings button → open options page ---------- */
+  settingsBtn.addEventListener("click", (e) => {
+    e.stopPropagation(); // Prevent drag
+    chrome.runtime.sendMessage({ action: "OPEN_EXTENSION_OPTION" });
+  });
+
+  /* ---------- Feedback link → Chrome Web Store ---------- */
+  feedbackLink.addEventListener("click", (e) => {
+    e.preventDefault();
+    window.open(
+      "https://chromewebstore.google.com/detail/oommkcdglakgcanecjjfbmoipcfiljbe",
+      "_blank",
+    );
   });
 
   /* ---------- MORE → expanded ---------- */
@@ -1318,10 +1367,15 @@ async function loadWidgetOnThePage() {
       countryData.countries &&
       countryData.countries.length > 0
     ) {
-      csv += `\nCountry (Top 5),Pageviews,Traffic Share (%)\n`;
+      csv += `\nCountry,Pageviews,Traffic Share (%)\n`;
       const rawCounts = countryData.rawCounts || [];
       for (let i = 0; i < countryData.countries.length; i++) {
-        csv += `${countryData.countries[i]},${rawCounts[i] || 0},${countryData.pageViews[i] || 0}\n`;
+        // Use rawCounts if available, otherwise compute from percentage and total PV
+        let count = rawCounts[i];
+        if (count === undefined || count === null) {
+          count = Math.round((countryData.pageViews[i] / 100) * totalPV);
+        }
+        csv += `${countryData.countries[i]},${count},${countryData.pageViews[i] || 0}\n`;
       }
     }
 
