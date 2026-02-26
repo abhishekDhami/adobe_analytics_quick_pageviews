@@ -685,7 +685,7 @@ async function loadWidgetOnThePage() {
     .tab-btn.disabled {
       color: #555;
       cursor: not-allowed;
-      opacity: 0.6;
+      opacity: 0.1;
     }
 
     .tab-btn-tooltip {
