@@ -6,7 +6,22 @@
 // =====================
 window.addEventListener("fetchPageWindowPathIdentifiers", (e) => {
   function getValueByPath(obj, path) {
-    return path.split(".").reduce((o, k) => o?.[k], obj);
+    // Supports dot notation, bracket notation, and mixed:
+    // "s.pageName" → ["s", "pageName"]
+    // "datalayer.adobe['sdk.customPageName']" → ["datalayer", "adobe", "sdk.customPageName"]
+    // 'window["some.key"]["nested"]' → ["some.key", "nested"]
+    const keys = [];
+    // Match: .key, ['key'], ["key"], or leading key
+    const regex = /(?:^|\.)\s*([a-zA-Z_$][\w$]*)|(?:\[\s*['"](.+?)['"]\s*\])|(?:\[\s*(\d+)\s*\])/g;
+    let match;
+    while ((match = regex.exec(path)) !== null) {
+      keys.push(match[1] || match[2] || match[3]);
+    }
+    if (keys.length === 0) {
+      // Fallback: simple dot split for basic paths
+      keys.push(...path.split("."));
+    }
+    return keys.reduce((o, k) => o?.[k], obj);
   }
   pageIdentifier = { ...e.detail };
   let value = getValueByPath(window, pageIdentifier.windowPath);

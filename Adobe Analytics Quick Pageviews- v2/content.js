@@ -1201,7 +1201,7 @@ async function loadWidgetOnThePage() {
   });
 
   /* ---------- Export CSV Button ---------- */
-  exportCsvBtn.addEventListener("click", () => {
+  exportCsvBtn.addEventListener("click", async () => {
     let csvContent = "";
     let filename = "";
 
@@ -1211,7 +1211,7 @@ async function loadWidgetOnThePage() {
         statusEl.textContent = "No data to export.";
         return;
       }
-      csvContent = buildCsvContent(lastCrData, lastCrCountryData, "Custom Report");
+      csvContent = await buildCsvContent(lastCrData, lastCrCountryData, "Custom Report");
       filename = `custom_report_${currentDatePreset}_${new Date().toISOString().split("T")[0]}.csv`;
     } else {
       // Export page performance data
@@ -1219,7 +1219,7 @@ async function loadWidgetOnThePage() {
         statusEl.textContent = "No data to export.";
         return;
       }
-      csvContent = buildCsvContent(lastPagePerfData, lastPagePerfCountryData, "Page Performance");
+      csvContent = await buildCsvContent(lastPagePerfData, lastPagePerfCountryData, "Page Performance");
       filename = `page_performance_${currentDatePreset}_${new Date().toISOString().split("T")[0]}.csv`;
     }
 
@@ -1236,12 +1236,34 @@ async function loadWidgetOnThePage() {
     URL.revokeObjectURL(url);
   });
 
-  function buildCsvContent(pageData, countryData, reportName) {
+  async function buildCsvContent(pageData, countryData, reportName) {
     let csv = "";
+    const granularity = pageData.granularity || "day";
+    const granularityLabels = { day: "Daily", week: "Weekly", month: "Monthly" };
+    const granularityLabel = granularityLabels[granularity] || "Daily";
 
     // Header section
     csv += `${reportName} - ${DATE_PRESET_LABELS[currentDatePreset] || currentDatePreset}\n`;
-    csv += `Exported: ${new Date().toLocaleString()}\n\n`;
+    csv += `Exported: ${new Date().toLocaleString()}\n`;
+
+    // Report Suite ID
+    const { selectedrsID } = await chrome.storage.local.get("selectedrsID");
+    if (selectedrsID) csv += `Report Suite: ${selectedrsID}\n`;
+
+    // Filter conditions
+    if (reportName === "Page Performance") {
+      const { pageIdentifierCondition } = await chrome.storage.local.get("pageIdentifierCondition");
+      if (pageIdentifierCondition) csv += `Filter: ${pageIdentifierCondition}\n`;
+    } else if (reportName === "Custom Report" && customReportConfig) {
+      let condition = `${customReportConfig.primaryDimension?.displayLabel || ""} ${customReportConfig.primaryMatch || ""} '${customReportConfig.primaryValue || ""}'`;
+      const secVal = crSecondarySelect?.value;
+      if (secVal && customReportConfig.secondaryDimension?.displayLabel) {
+        condition += ` AND ${customReportConfig.secondaryDimension.displayLabel} exact '${secVal}'`;
+      }
+      csv += `Filter: ${condition}\n`;
+    }
+
+    csv += `\n`;
 
     // Totals
     const totalPV = pageData.filteredTotals?.[0] || 0;
@@ -1250,8 +1272,8 @@ async function loadWidgetOnThePage() {
     csv += `Total Pageviews,Total Visits,Total Visitors\n`;
     csv += `${totalPV},${totalVisits},${totalVisitors}\n\n`;
 
-    // Trend data
-    csv += `Date,Pageviews,Visits,Visitors\n`;
+    // Trend data with granularity in column header
+    csv += `Date (${granularityLabel}),Pageviews,Visits,Visitors\n`;
     const dates = pageData.dates || [];
     const pvs = pageData.pageViews || [];
     const visits = pageData.visits || [];
@@ -1260,11 +1282,12 @@ async function loadWidgetOnThePage() {
       csv += `${dates[i]},${pvs[i] || 0},${visits[i] || 0},${visitors[i] || 0}\n`;
     }
 
-    // Country data
+    // Country data with raw counts
     if (countryData && countryData.countries && countryData.countries.length > 0) {
-      csv += `\nCountry,Traffic Share (%)\n`;
+      csv += `\nCountry,Pageviews,Traffic Share (%)\n`;
+      const rawCounts = countryData.rawCounts || [];
       for (let i = 0; i < countryData.countries.length; i++) {
-        csv += `${countryData.countries[i]},${countryData.pageViews[i] || 0}\n`;
+        csv += `${countryData.countries[i]},${rawCounts[i] || 0},${countryData.pageViews[i] || 0}\n`;
       }
     }
 

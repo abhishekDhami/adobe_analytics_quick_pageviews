@@ -394,10 +394,11 @@ function getReport(pageIdentifier, reportType = "pageViews", datePreset = "7d") 
           });
           data.filteredTotals = reportData?.summaryData?.filteredTotals || [];
         } else if (reportType === "countryData") {
-          data = { countries: [], pageViews: [] };
+          data = { countries: [], pageViews: [], rawCounts: [] };
           let totals = reportData?.summaryData.filteredTotals[0];
           rows.forEach((row) => {
             data.countries.push(row.value);
+            data.rawCounts.push(row.data[0] || 0);
             let prctContribution = (row.data[0] / totals) * 100;
             prctContribution = prctContribution.toFixed(2);
             prctContribution = parseFloat(prctContribution);
@@ -562,10 +563,11 @@ function getCustomReport(pageIdentifier, reportType = "pageViews", datePreset = 
           });
           data.filteredTotals = reportData?.summaryData?.filteredTotals || [];
         } else if (reportType === "countryData") {
-          data = { countries: [], pageViews: [] };
+          data = { countries: [], pageViews: [], rawCounts: [] };
           let totals = reportData?.summaryData.filteredTotals[0];
           rows.forEach((row) => {
             data.countries.push(row.value);
+            data.rawCounts.push(row.data[0] || 0);
             let prctContribution = (row.data[0] / totals) * 100;
             prctContribution = parseFloat(prctContribution.toFixed(2));
             data.pageViews.push(prctContribution);
