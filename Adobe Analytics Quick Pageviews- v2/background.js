@@ -11,6 +11,15 @@ const DERIVED_KEY_SESSION = "derivedKeyCache";
 // =====================
 // Date Preset Helpers
 // =====================
+
+// Format date as YYYY-MM-DD using local timezone (avoids UTC shift with toISOString)
+function formatLocalDate(d) {
+  const yyyy = d.getFullYear();
+  const mm = String(d.getMonth() + 1).padStart(2, "0");
+  const dd = String(d.getDate()).padStart(2, "0");
+  return `${yyyy}-${mm}-${dd}`;
+}
+
 const DATE_PRESETS = {
   "7d": { label: "Last 7 Days", days: 7, granularity: "day", dimension: "variables/daterangeday" },
   "3w": { label: "Last 3 Weeks", weeks: 3, granularity: "week", dimension: "variables/daterangeweek" },
@@ -19,9 +28,30 @@ const DATE_PRESETS = {
   "6m": { label: "Last 6 Months", months: 6, granularity: "month", dimension: "variables/daterangemonth" },
 };
 
-function getDateRangeForPreset(presetKey) {
+// Get today's date in the report suite's timezone (falls back to local timezone)
+function getTodayInTimezone(tz) {
+  try {
+    if (tz) {
+      // Intl.DateTimeFormat with en-CA locale gives YYYY-MM-DD format
+      const dateStr = new Intl.DateTimeFormat("en-CA", {
+        timeZone: tz,
+        year: "numeric",
+        month: "2-digit",
+        day: "2-digit",
+      }).format(new Date());
+      // Parse YYYY-MM-DD into a local Date object
+      const [y, m, d] = dateStr.split("-").map(Number);
+      return new Date(y, m - 1, d);
+    }
+  } catch (e) {
+    console.log("Error using report suite timezone, falling back to local:", e);
+  }
+  return new Date();
+}
+
+function getDateRangeForPreset(presetKey, reportSuiteTimezone) {
   const preset = DATE_PRESETS[presetKey] || DATE_PRESETS["7d"];
-  const today = new Date();
+  const today = getTodayInTimezone(reportSuiteTimezone);
   let startDate, endDate, limit;
 
   if (preset.granularity === "day") {
@@ -48,21 +78,17 @@ function getDateRangeForPreset(presetKey) {
     startDate.setDate(currentWeekMonday.getDate() - (preset.weeks - 1) * 7);
     limit = preset.weeks;
   } else if (preset.granularity === "month") {
-    // For monthly: go back N months from the current month
-    // Start of current month
-    const currentMonthStart = new Date(today.getFullYear(), today.getMonth(), 1);
-
-    // End date is start of next month (to include current month)
+    // For monthly: include current month + (N-1) previous months
+    // End date is start of next month (to include current month fully)
     endDate = new Date(today.getFullYear(), today.getMonth() + 1, 1);
 
-    // Start date is N months back from current month start
-    startDate = new Date(currentMonthStart);
-    startDate.setMonth(currentMonthStart.getMonth() - (preset.months - 1));
+    // Start date is first day of (current month - (N-1))
+    startDate = new Date(today.getFullYear(), today.getMonth() - (preset.months - 1), 1);
     limit = preset.months;
   }
 
-  const formatDate = (d) => d.toISOString().split("T")[0];
-  const dateRangeString = `${formatDate(startDate)}T00:00:00.000/${formatDate(endDate)}T00:00:00.000`;
+  
+  const dateRangeString = `${formatLocalDate(startDate)}T00:00:00.000/${formatLocalDate(endDate)}T00:00:00.000`;
 
   return {
     dateRangeString,
@@ -181,12 +207,12 @@ async function getEnableOnPageFlag() {
 function getReport(pageIdentifier, reportType = "pageViews", datePreset = "7d") {
   return new Promise(async (resolve, reject) => {
     try {
-      const { client_id, selectedCompanyID, selectedrsID, pageIdentifierConfig } = await chrome.storage.local.get(["client_id", "selectedCompanyID", "selectedrsID", "pageIdentifierConfig"]);
+      const { client_id, selectedCompanyID, selectedrsID, pageIdentifierConfig, reportSuiteTimezone } = await chrome.storage.local.get(["client_id", "selectedCompanyID", "selectedrsID", "pageIdentifierConfig", "reportSuiteTimezone"]);
 
       if (pageIdentifier == undefined) resolve(null);
 
       // Use preset for date range and granularity
-      const presetConfig = getDateRangeForPreset(datePreset);
+      const presetConfig = getDateRangeForPreset(datePreset, reportSuiteTimezone);
       let dateRangeString = presetConfig.dateRangeString;
 
       let adobeDimension = pageIdentifierConfig.adobeDimensionConfig.dimension || "Page";
@@ -398,14 +424,14 @@ function getReport(pageIdentifier, reportType = "pageViews", datePreset = "7d") 
 function getCustomReport(pageIdentifier, reportType = "pageViews", datePreset = "7d", customFilters = {}) {
   return new Promise(async (resolve, reject) => {
     try {
-      const { client_id, selectedCompanyID, selectedrsID } = await chrome.storage.local.get(["client_id", "selectedCompanyID", "selectedrsID"]);
+      const { client_id, selectedCompanyID, selectedrsID, reportSuiteTimezone } = await chrome.storage.local.get(["client_id", "selectedCompanyID", "selectedrsID", "reportSuiteTimezone"]);
 
       if (!customFilters.primaryDimension || !customFilters.primaryValue) {
         resolve(null);
         return;
       }
 
-      const presetConfig = getDateRangeForPreset(datePreset);
+      const presetConfig = getDateRangeForPreset(datePreset, reportSuiteTimezone);
       let dateRangeString = presetConfig.dateRangeString;
 
       // Build custom report cache key
@@ -781,7 +807,7 @@ async function fetchReportSuites(companyId) {
   await chrome.storage.local.set({
     selectedCompanyID: companyId,
   });
-  const suitesResp = await fetch(`https://analytics.adobe.io/api/${companyId}/collections/suites?limit=30`, {
+  const suitesResp = await fetch(`https://analytics.adobe.io/api/${companyId}/collections/suites?limit=30&expansion=timezoneZoneinfo`, {
     headers: { Authorization: `Bearer ${accessToken}`, "x-api-key": client_id, "x-proxy-global-company-id": companyId },
   });
   const suitesData = await suitesResp.json();
@@ -953,16 +979,16 @@ async function fetchDimensionValues(companyId, rsid, dimensionId, limit = 50, se
       return tokenResponse;
     }
     let accessToken = tokenResponse.accessToken;
-    const { client_id } = await chrome.storage.local.get(["client_id"]);
+    const { client_id, reportSuiteTimezone } = await chrome.storage.local.get(["client_id", "reportSuiteTimezone"]);
 
-    // Calculate last 30 days date range
-    const today = new Date();
+    // Calculate last 30 days date range using report suite timezone
+    const today = getTodayInTimezone(reportSuiteTimezone);
     const endDate = new Date(today);
     endDate.setDate(today.getDate() + 1);
     const startDate = new Date(today);
     startDate.setDate(today.getDate() - 29);
-    const formatDate = (d) => d.toISOString().split("T")[0];
-    const dateRangeString = `${formatDate(startDate)}T00:00:00.000/${formatDate(endDate)}T00:00:00.000`;
+    
+    const dateRangeString = `${formatLocalDate(startDate)}T00:00:00.000/${formatLocalDate(endDate)}T00:00:00.000`;
 
     // Build global filters
     let globalFilters = [
