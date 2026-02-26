@@ -15,6 +15,8 @@ const DATE_PRESETS = {
   "7d": { label: "Last 7 Days", days: 7, granularity: "day", dimension: "variables/daterangeday" },
   "3w": { label: "Last 3 Weeks", weeks: 3, granularity: "week", dimension: "variables/daterangeweek" },
   "5w": { label: "Last 5 Weeks", weeks: 5, granularity: "week", dimension: "variables/daterangeweek" },
+  "3m": { label: "Last 3 Months", months: 3, granularity: "month", dimension: "variables/daterangemonth" },
+  "6m": { label: "Last 6 Months", months: 6, granularity: "month", dimension: "variables/daterangemonth" },
 };
 
 function getDateRangeForPreset(presetKey) {
@@ -45,6 +47,18 @@ function getDateRangeForPreset(presetKey) {
     startDate = new Date(currentWeekMonday);
     startDate.setDate(currentWeekMonday.getDate() - (preset.weeks - 1) * 7);
     limit = preset.weeks;
+  } else if (preset.granularity === "month") {
+    // For monthly: go back N months from the current month
+    // Start of current month
+    const currentMonthStart = new Date(today.getFullYear(), today.getMonth(), 1);
+
+    // End date is start of next month (to include current month)
+    endDate = new Date(today.getFullYear(), today.getMonth() + 1, 1);
+
+    // Start date is N months back from current month start
+    startDate = new Date(currentMonthStart);
+    startDate.setMonth(currentMonthStart.getMonth() - (preset.months - 1));
+    limit = preset.months;
   }
 
   const formatDate = (d) => d.toISOString().split("T")[0];
