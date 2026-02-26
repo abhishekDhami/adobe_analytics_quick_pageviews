@@ -1009,14 +1009,20 @@ async function loadWidgetOnThePage() {
       badge.classList.remove("collapsed", "minimal");
       badge.classList.add("expanded");
       showLoading();
-      // Fetch data and render expanded view
+      // Fetch data and render expanded view directly with correct preset
       setTimeout(async () => {
-        await fetchPageData();
+        // Get page identifier first (needed for API calls)
+        let pageIdentifierResp = await fetchPageIdentifiers();
+        if (pageIdentifierResp.success === false) {
+          hideLoading();
+          return;
+        }
         let resp = await checkToken();
         if (resp) {
           const pageData = await getPageData(currentDatePreset);
           const countryData = await getCountryData(currentDatePreset);
           hideLoading();
+          renderMetrics(pageData);
           updateChartTitles();
           renderCharts(pageData, countryData);
           updateFilterCondition();
@@ -1088,6 +1094,7 @@ async function loadWidgetOnThePage() {
     const countryData = await getCountryData(currentDatePreset);
     hideLoading();
 
+    renderMetrics(pageData);
     updateChartTitles();
     renderCharts(pageData, countryData);
     updateFilterCondition();
@@ -1097,7 +1104,7 @@ async function loadWidgetOnThePage() {
   });
 
   /* ---------- collapse → minimal ---------- */
-  collapseBtn.addEventListener("click", () => {
+  collapseBtn.addEventListener("click", async () => {
     badge.classList.remove("expanded");
     badge.classList.add("minimal");
     sessionStorage.setItem("adobePVExtensionViewMode", "minimal");
@@ -1105,6 +1112,12 @@ async function loadWidgetOnThePage() {
     chartInstances = {};
     Object.values(crChartInstances).forEach((c) => c?.destroy());
     crChartInstances = {};
+
+    // Refresh minimal view with 7d data for today/yesterday values
+    showLoading();
+    const pageData = await getPageData("7d");
+    hideLoading();
+    if (pageData) renderMetrics(pageData);
   });
 
   /* ---------- Tab Switching ---------- */
