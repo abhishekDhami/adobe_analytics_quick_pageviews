@@ -305,7 +305,7 @@ async function loadWidgetOnThePage() {
       background: transparent;
       border: none;
       color: #777;
-      font-size: 14px;
+      font-size: 18px;
       cursor: pointer;
       padding: 2px;
       line-height: 1;
