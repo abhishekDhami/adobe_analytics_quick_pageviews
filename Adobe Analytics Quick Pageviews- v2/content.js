@@ -590,7 +590,7 @@ async function loadWidgetOnThePage() {
       background: transparent;
       border: none;
       color: #888;
-      font-size: 13px;
+      font-size: 18px;
       cursor: pointer;
       padding: 2px 4px;
       border-radius: 3px;
@@ -1321,6 +1321,7 @@ async function loadWidgetOnThePage() {
     // Header section
     csv += `${reportName} - ${DATE_PRESET_LABELS[currentDatePreset] || currentDatePreset}\n`;
     csv += `Exported: ${new Date().toLocaleString()}\n`;
+    csv += `Source: Adobe Analytics Workspace\n`;
 
     // Report Suite ID
     const { selectedrsID } = await chrome.storage.local.get("selectedrsID");
@@ -1367,7 +1368,7 @@ async function loadWidgetOnThePage() {
       countryData.countries &&
       countryData.countries.length > 0
     ) {
-      csv += `\nCountry,Pageviews,Traffic Share (%)\n`;
+      csv += `\nCountry (Top 5 Countries),Pageviews,Traffic Share (%)\n`;
       const rawCounts = countryData.rawCounts || [];
       for (let i = 0; i < countryData.countries.length; i++) {
         // Use rawCounts if available, otherwise compute from percentage and total PV
