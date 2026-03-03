@@ -1498,6 +1498,41 @@ async function loadWidgetOnThePage() {
     );
   });
 
+  // ---------- Auto-refresh on tab focus (after re-authentication) ----------
+  document.addEventListener("visibilitychange", async () => {
+    if (document.hidden) return;
+    if (!toggle.checked) return;
+
+    // Only auto-refresh if widget was showing "Token is invalid" state
+    if (reauthBtn.hidden) return;
+
+    const isValid = await checkTokenValidity();
+    if (!isValid) return;
+
+    // Token is now valid — user re-authenticated on options page
+    reauthBtn.hidden = true;
+    statusEl.textContent = "";
+    showLoading();
+
+    const currentView = badge.classList.contains("expanded") ? "expanded" : "minimal";
+
+    if (currentView === "expanded") {
+      const pageData = await getPageData(currentDatePreset);
+      const countryData = await getCountryData(currentDatePreset);
+      hideLoading();
+      if (pageData && countryData) {
+        renderMetrics(pageData);
+        updateChartTitles();
+        renderCharts(pageData, countryData);
+        updateFilterCondition();
+        await loadCustomReportTab();
+      }
+    } else {
+      await fetchPageData();
+      hideLoading();
+    }
+  });
+
   // ---------- Checking Token validity ----------
   async function checkToken() {
     const isTokenValid = await checkTokenValidity();

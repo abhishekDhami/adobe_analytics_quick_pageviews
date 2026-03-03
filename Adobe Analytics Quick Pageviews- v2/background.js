@@ -4,7 +4,7 @@ const analyticsDiscoveryUrl = "https://analytics.adobe.io/discovery/me";
 const reportingAPIURL = "https://analytics.adobe.io/api";
 let sessionKey = null; // In-memory encryption key
 let sessionTimer = null; // Timer for automatic expiry
-const SESSION_TIMEOUT_MS = 2 * 60 * 60 * 1000; // 4 hours
+const SESSION_TIMEOUT_MS = 4 * 60 * 60 * 1000; // 4 hours
 const WRAPPED_KEY_STORAGE = "wrappedSessionKey";
 const DERIVED_KEY_SESSION = "derivedKeyCache";
 
@@ -21,36 +21,11 @@ function formatLocalDate(d) {
 }
 
 const DATE_PRESETS = {
-  "7d": {
-    label: "Last 7 Days",
-    days: 7,
-    granularity: "day",
-    dimension: "variables/daterangeday",
-  },
-  "3w": {
-    label: "Last 3 Weeks",
-    weeks: 3,
-    granularity: "week",
-    dimension: "variables/daterangeweek",
-  },
-  "5w": {
-    label: "Last 5 Weeks",
-    weeks: 5,
-    granularity: "week",
-    dimension: "variables/daterangeweek",
-  },
-  "3m": {
-    label: "Last 3 Months",
-    months: 3,
-    granularity: "month",
-    dimension: "variables/daterangemonth",
-  },
-  "6m": {
-    label: "Last 6 Months",
-    months: 6,
-    granularity: "month",
-    dimension: "variables/daterangemonth",
-  },
+  "7d": { label: "Last 7 Days", days: 7, granularity: "day", dimension: "variables/daterangeday" },
+  "3w": { label: "Last 3 Weeks", weeks: 3, granularity: "week", dimension: "variables/daterangeweek" },
+  "5w": { label: "Last 5 Weeks", weeks: 5, granularity: "week", dimension: "variables/daterangeweek" },
+  "3m": { label: "Last 3 Months", months: 3, granularity: "month", dimension: "variables/daterangemonth" },
+  "6m": { label: "Last 6 Months", months: 6, granularity: "month", dimension: "variables/daterangemonth" },
 };
 
 // Get today's date in the report suite's timezone (falls back to local timezone)
@@ -108,14 +83,11 @@ function getDateRangeForPreset(presetKey, reportSuiteTimezone) {
     endDate = new Date(today.getFullYear(), today.getMonth() + 1, 1);
 
     // Start date is first day of (current month - (N-1))
-    startDate = new Date(
-      today.getFullYear(),
-      today.getMonth() - (preset.months - 1),
-      1,
-    );
+    startDate = new Date(today.getFullYear(), today.getMonth() - (preset.months - 1), 1);
     limit = preset.months;
   }
 
+  
   const dateRangeString = `${formatLocalDate(startDate)}T00:00:00.000/${formatLocalDate(endDate)}T00:00:00.000`;
 
   return {
@@ -148,8 +120,7 @@ function safeAdobeTruncate(inpString, byteLimit = 100) {
     // 1. Convert to UTF-8 bytes
     const allBytes = encoder.encode(inpString);
 
-    if (allBytes.length <= byteLimit - 1)
-      return { opStr: inpString, maxLimitReached: maxLimitReached };
+    if (allBytes.length <= byteLimit - 1) return { opStr: inpString, maxLimitReached: maxLimitReached };
 
     // 2. Slice to the byte limit
     const truncatedBytes = allBytes.slice(0, byteLimit);
@@ -159,10 +130,7 @@ function safeAdobeTruncate(inpString, byteLimit = 100) {
     let decodedString = decoder.decode(truncatedBytes);
 
     // 4. Remove the corrupted replacement character if it's at the end
-    return {
-      opStr: decodedString.replace(/\uFFFD$/g, ""),
-      maxLimitReached: maxLimitReached,
-    };
+    return { opStr: decodedString.replace(/\uFFFD$/g, ""), maxLimitReached: maxLimitReached };
   } catch (err) {
     return { opStr: "", maxLimitReached: maxLimitReached };
   }
@@ -199,11 +167,9 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
       }
     });
   } else if (msg.action === "GET_REPORT") {
-    getReport(msg.pageIdentifier, msg.reportType, msg.datePreset).then(
-      (reportData) => {
-        sendResponse(reportData);
-      },
-    );
+    getReport(msg.pageIdentifier, msg.reportType, msg.datePreset).then((reportData) => {
+      sendResponse(reportData);
+    });
     return true;
   } else if (msg.action === "GET_DATE_PRESET") {
     chrome.storage.local.get(["datePreset"], (result) => {
@@ -219,23 +185,12 @@ chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
     });
     return true;
   } else if (msg.action === "FETCH_DIMENSION_VALUES") {
-    fetchDimensionValues(
-      msg.companyId,
-      msg.rsid,
-      msg.dimensionId,
-      msg.limit,
-      msg.segmentFilter,
-    ).then((resp) => {
+    fetchDimensionValues(msg.companyId, msg.rsid, msg.dimensionId, msg.limit, msg.segmentFilter).then((resp) => {
       sendResponse(resp);
     });
     return true;
   } else if (msg.action === "GET_CUSTOM_REPORT") {
-    getCustomReport(
-      msg.pageIdentifier,
-      msg.reportType,
-      msg.datePreset,
-      msg.customFilters,
-    ).then((reportData) => {
+    getCustomReport(msg.pageIdentifier, msg.reportType, msg.datePreset, msg.customFilters).then((reportData) => {
       sendResponse(reportData);
     });
     return true;
@@ -249,42 +204,21 @@ async function getEnableOnPageFlag() {
   return enableOnPage;
 }
 
-function getReport(
-  pageIdentifier,
-  reportType = "pageViews",
-  datePreset = "7d",
-) {
+function getReport(pageIdentifier, reportType = "pageViews", datePreset = "7d") {
   return new Promise(async (resolve, reject) => {
     try {
-      const {
-        selectedCompanyID,
-        selectedrsID,
-        pageIdentifierConfig,
-        reportSuiteTimezone,
-      } = await chrome.storage.local.get([
-        "selectedCompanyID",
-        "selectedrsID",
-        "pageIdentifierConfig",
-        "reportSuiteTimezone",
-      ]);
+      const { selectedCompanyID, selectedrsID, pageIdentifierConfig, reportSuiteTimezone } = await chrome.storage.local.get(["selectedCompanyID", "selectedrsID", "pageIdentifierConfig", "reportSuiteTimezone"]);
       const clientCreds = await decryptClientCredentials();
-      if (!clientCreds) {
-        resolve({ reportData: null, success: false });
-        return;
-      }
+      if (!clientCreds) { resolve({ reportData: null, success: false }); return; }
       const client_id = clientCreds.client_id;
 
       if (pageIdentifier == undefined) resolve(null);
 
       // Use preset for date range and granularity
-      const presetConfig = getDateRangeForPreset(
-        datePreset,
-        reportSuiteTimezone,
-      );
+      const presetConfig = getDateRangeForPreset(datePreset, reportSuiteTimezone);
       let dateRangeString = presetConfig.dateRangeString;
 
-      let adobeDimension =
-        pageIdentifierConfig.adobeDimensionConfig.dimension || "Page";
+      let adobeDimension = pageIdentifierConfig.adobeDimensionConfig.dimension || "Page";
       adobeDimension = adobeDimension.toLowerCase();
       let pageIdentifierValue = "";
       if (pageIdentifierConfig.source === "url") {
@@ -331,8 +265,7 @@ function getReport(
         pageIdentifierCondition: matchCondition,
       });
 
-      let segmentMatchCondition =
-        pageIdentifierConfig.adobeDimensionConfig.match;
+      let segmentMatchCondition = pageIdentifierConfig.adobeDimensionConfig.match;
       if (segmentMatchCondition === "exact") {
         segmentMatchCondition = "streq";
       } else if (segmentMatchCondition === "contains") {
@@ -342,28 +275,14 @@ function getReport(
       }
 
       //When user has selected 'exact' and pageIdentifierValue is already truncated then we will convert matching condition to 'contains'
-      if (
-        segmentMatchCondition === "streq" &&
-        truncationResult.maxLimitReached === true
-      ) {
+      if (segmentMatchCondition === "streq" && truncationResult.maxLimitReached === true) {
         segmentMatchCondition = "contains";
       }
 
       //Reading data from Cache first — include datePreset in cache key
-      let cacheReadResponse = await readCache(
-        selectedrsID,
-        pageIdentifier.value,
-        pageIdentifierConfig.adobeDimensionConfig.dimension,
-        pageIdentifierConfig.adobeDimensionConfig.match,
-        reportType,
-        datePreset,
-      );
+      let cacheReadResponse = await readCache(selectedrsID, pageIdentifier.value, pageIdentifierConfig.adobeDimensionConfig.dimension, pageIdentifierConfig.adobeDimensionConfig.match, reportType, datePreset);
       if (cacheReadResponse.data != null && cacheReadResponse.hit === true) {
-        resolve({
-          reportData: cacheReadResponse.data,
-          success: true,
-          fromCache: true,
-        });
+        resolve({ reportData: cacheReadResponse.data, success: true, fromCache: true });
         return;
       }
 
@@ -469,14 +388,7 @@ function getReport(
       if (rows && rows.length > 0) {
         let data = null;
         if (reportType === "pageViews") {
-          data = {
-            dates: [],
-            pageViews: [],
-            visits: [],
-            visitors: [],
-            filteredTotals: [],
-            granularity: presetConfig.granularity,
-          };
+          data = { dates: [], pageViews: [], visits: [], visitors: [], filteredTotals: [], granularity: presetConfig.granularity };
           rows.forEach((row) => {
             data.dates.push(row.value);
             data.pageViews.push(row.data[0]);
@@ -496,15 +408,7 @@ function getReport(
             data.pageViews.push(prctContribution);
           });
         }
-        saveCache(
-          selectedrsID,
-          pageIdentifier.value,
-          pageIdentifierConfig.adobeDimensionConfig.dimension,
-          pageIdentifierConfig.adobeDimensionConfig.match,
-          reportType,
-          datePreset,
-          data,
-        );
+        saveCache(selectedrsID, pageIdentifier.value, pageIdentifierConfig.adobeDimensionConfig.dimension, pageIdentifierConfig.adobeDimensionConfig.match, reportType, datePreset, data);
         resolve({ reportData: data, success: true, fromCache: false });
         cleanupExpiredCache();
       } else {
@@ -521,25 +425,12 @@ function getReport(
 // Custom report: filtered by primary dimension + optional secondary dimension only (no page identifier)
 // customFilters = { primaryDimension: "variables/evar5", primaryMatch: "exact"|"contains", primaryValue: "ABC",
 //                   secondaryDimension: "variables/prop3" (optional), secondaryValue: "XYZ" (optional) }
-function getCustomReport(
-  pageIdentifier,
-  reportType = "pageViews",
-  datePreset = "7d",
-  customFilters = {},
-) {
+function getCustomReport(pageIdentifier, reportType = "pageViews", datePreset = "7d", customFilters = {}) {
   return new Promise(async (resolve, reject) => {
     try {
-      const { selectedCompanyID, selectedrsID, reportSuiteTimezone } =
-        await chrome.storage.local.get([
-          "selectedCompanyID",
-          "selectedrsID",
-          "reportSuiteTimezone",
-        ]);
+      const { selectedCompanyID, selectedrsID, reportSuiteTimezone } = await chrome.storage.local.get(["selectedCompanyID", "selectedrsID", "reportSuiteTimezone"]);
       const clientCreds = await decryptClientCredentials();
-      if (!clientCreds) {
-        resolve({ reportData: null, success: false });
-        return;
-      }
+      if (!clientCreds) { resolve({ reportData: null, success: false }); return; }
       const client_id = clientCreds.client_id;
 
       if (!customFilters.primaryDimension || !customFilters.primaryValue) {
@@ -547,10 +438,7 @@ function getCustomReport(
         return;
       }
 
-      const presetConfig = getDateRangeForPreset(
-        datePreset,
-        reportSuiteTimezone,
-      );
+      const presetConfig = getDateRangeForPreset(datePreset, reportSuiteTimezone);
       let dateRangeString = presetConfig.dateRangeString;
 
       // Build custom report cache key
@@ -572,13 +460,9 @@ function getCustomReport(
       }
 
       // Build metrics and dimension
-      let metricsArray = [],
-        rowDimension = "",
-        customSettings = {};
+      let metricsArray = [], rowDimension = "", customSettings = {};
       if (reportType === "countryData") {
-        metricsArray = [
-          { id: "metrics/pageviews", columnId: "0", sort: "desc" },
-        ];
+        metricsArray = [{ id: "metrics/pageviews", columnId: "0", sort: "desc" }];
         rowDimension = "variables/geocountry";
         customSettings = { limit: 5 };
       } else if (reportType === "pageViews") {
@@ -595,8 +479,7 @@ function getCustomReport(
       let andPredicates = [];
 
       // Primary dimension predicate
-      let primaryMatchFunc =
-        customFilters.primaryMatch === "exact" ? "streq" : "contains";
+      let primaryMatchFunc = customFilters.primaryMatch === "exact" ? "streq" : "contains";
       andPredicates.push({
         func: "container",
         context: "hits",
@@ -677,14 +560,7 @@ function getCustomReport(
       if (rows && rows.length > 0) {
         let data = null;
         if (reportType === "pageViews") {
-          data = {
-            dates: [],
-            pageViews: [],
-            visits: [],
-            visitors: [],
-            filteredTotals: [],
-            granularity: presetConfig.granularity,
-          };
+          data = { dates: [], pageViews: [], visits: [], visitors: [], filteredTotals: [], granularity: presetConfig.granularity };
           rows.forEach((row) => {
             data.dates.push(row.value);
             data.pageViews.push(row.data[0]);
@@ -705,9 +581,7 @@ function getCustomReport(
         }
         // Save to cache
         let ttl = new Date().getTime() + 15 * 60 * 1000;
-        await chrome.storage.local.set({
-          [customCacheKey]: { data: data, ttl },
-        });
+        await chrome.storage.local.set({ [customCacheKey]: { data: data, ttl } });
         resolve({ reportData: data, success: true, fromCache: false });
         cleanupExpiredCache();
       } else {
@@ -720,14 +594,7 @@ function getCustomReport(
   });
 }
 
-function readCache(
-  rsid,
-  pageIdentifierValue,
-  pageIdentifierDimension,
-  pageIdentifierMatchType,
-  reportType,
-  datePreset = "7d",
-) {
+function readCache(rsid, pageIdentifierValue, pageIdentifierDimension, pageIdentifierMatchType, reportType, datePreset = "7d") {
   return new Promise(async (resolve, reject) => {
     try {
       let cacheKey = `CACHE||${rsid}||${pageIdentifierDimension}||${pageIdentifierMatchType}||${pageIdentifierValue}||${reportType}||${datePreset}`;
@@ -755,15 +622,7 @@ function readCache(
   });
 }
 
-async function saveCache(
-  rsid,
-  pageIdentifierValue,
-  pageIdentifierDimension,
-  pageIdentifierMatchType,
-  reportType,
-  datePreset = "7d",
-  reportData,
-) {
+async function saveCache(rsid, pageIdentifierValue, pageIdentifierDimension, pageIdentifierMatchType, reportType, datePreset = "7d", reportData) {
   return new Promise(async (resolve, reject) => {
     try {
       let cacheKey = `CACHE||${rsid}||${pageIdentifierDimension}||${pageIdentifierMatchType}||${pageIdentifierValue}||${reportType}||${datePreset}`;
@@ -832,13 +691,11 @@ chrome.runtime.onMessage.addListener(async (msg, sender, sendResponse) => {
       break;
 
     case "GET_DECRYPTED_CLIENT_CREDS":
+      // Attempt migration first (handles existing users with plaintext creds)
+      await migrateClientCredentials();
       const creds = await decryptClientCredentials();
       if (creds) {
-        sendResponse({
-          success: true,
-          client_id: creds.client_id,
-          client_secret: creds.client_secret,
-        });
+        sendResponse({ success: true, client_id: creds.client_id, client_secret: creds.client_secret });
       } else {
         sendResponse({ success: false });
       }
@@ -850,8 +707,7 @@ chrome.runtime.onMessage.addListener(async (msg, sender, sendResponse) => {
       let org_id = msg.org_id;
       let userpassword = msg.userpassword;
       const redirectUri = chrome.identity.getRedirectURL();
-      const scope =
-        "additional_info.projectedProductContext, openid, read_organizations, additional_info.job_function, AdobeID";
+      const scope = "additional_info.projectedProductContext, openid, read_organizations, additional_info.job_function, AdobeID";
       const params = new URLSearchParams({
         client_id,
         response_type: "code",
@@ -860,82 +716,58 @@ chrome.runtime.onMessage.addListener(async (msg, sender, sendResponse) => {
       });
       let authUrlwithParam = `${authUrl}?${params.toString()}`;
 
-      chrome.identity.launchWebAuthFlow(
-        { url: authUrlwithParam, interactive: true },
-        async (redirectResponse) => {
-          try {
-            if (chrome.runtime.lastError || !redirectResponse) {
-              sendResponse({
-                error:
-                  "Authentication failed. Please try again with valid credentials",
-              });
-              return;
-            }
-            const code = new URL(redirectResponse).searchParams.get("code");
-
-            const body = new URLSearchParams({
-              grant_type: "authorization_code",
-              client_id,
-              client_secret,
-              code,
-            });
-
-            const tokenResp = await fetch(tokenUrl, {
-              method: "POST",
-              headers: { "Content-Type": "application/x-www-form-urlencoded" },
-              body: body.toString(),
-            });
-
-            const tokenData = await tokenResp.json();
-
-            if (!tokenData.access_token) {
-              let msg =
-                "Token fetch failed. Please try again with valid credentials.";
-              if (tokenData.error) msg += ` Error: ${tokenData.error}`;
-              sendResponse({ error: msg });
-              return;
-            }
-
-            let expires_at = Date.now() + (tokenData.expires_in || 3600) * 1000;
-
-            await encryptAndStoreCredentials(
-              userpassword,
-              tokenData.access_token,
-              tokenData.refresh_token,
-              client_id,
-              client_secret,
-              org_id,
-              expires_at,
-            );
-            let companyDataResponse = await fetchCompaniesAndSuites();
-            if (companyDataResponse.success) {
-              sendResponse({
-                success: true,
-                companiesData: companyDataResponse.data,
-              });
-              return;
-            } else {
-              sendResponse(companyDataResponse);
-              return;
-            }
-          } catch (error) {
-            sendResponse({
-              error:
-                "An error occurred during authentication. Please try with valid credentials.",
-            });
-            console.log(error);
+      chrome.identity.launchWebAuthFlow({ url: authUrlwithParam, interactive: true }, async (redirectResponse) => {
+        try {
+          if (chrome.runtime.lastError || !redirectResponse) {
+            sendResponse({ error: "Authentication failed. Please try again with valid credentials" });
+            return;
           }
-        },
-      );
+          const code = new URL(redirectResponse).searchParams.get("code");
+
+          const body = new URLSearchParams({
+            grant_type: "authorization_code",
+            client_id,
+            client_secret,
+            code,
+          });
+
+          const tokenResp = await fetch(tokenUrl, {
+            method: "POST",
+            headers: { "Content-Type": "application/x-www-form-urlencoded" },
+            body: body.toString(),
+          });
+
+          const tokenData = await tokenResp.json();
+
+          if (!tokenData.access_token) {
+            let msg = "Token fetch failed. Please try again with valid credentials.";
+            if (tokenData.error) msg += ` Error: ${tokenData.error}`;
+            sendResponse({ error: msg });
+            return;
+          }
+
+          let expires_at = Date.now() + (tokenData.expires_in || 3600) * 1000;
+
+          await encryptAndStoreCredentials(userpassword, tokenData.access_token, tokenData.refresh_token, client_id, client_secret, org_id, expires_at);
+          let companyDataResponse = await fetchCompaniesAndSuites();
+          if (companyDataResponse.success) {
+            sendResponse({ success: true, companiesData: companyDataResponse.data });
+            return;
+          } else {
+            sendResponse(companyDataResponse);
+            return;
+          }
+        } catch (error) {
+          sendResponse({ error: "An error occurred during authentication. Please try with valid credentials." });
+          console.log(error);
+        }
+      });
       break;
 
     case "FETCH_COMPANIES":
       let companyDataResponse = await fetchCompaniesAndSuites();
       if (companyDataResponse.success) {
-        sendResponse({
-          success: true,
-          companiesData: companyDataResponse.data,
-        });
+        sendResponse({ success: true, companiesData: companyDataResponse.data });
         return;
       } else {
         sendResponse(companyDataResponse);
@@ -947,10 +779,7 @@ chrome.runtime.onMessage.addListener(async (msg, sender, sendResponse) => {
       let companyId = msg.companyId;
       let suitesDataResponse = await fetchReportSuites(companyId);
       if (suitesDataResponse.success) {
-        sendResponse({
-          success: true,
-          suitesData: suitesDataResponse.suitesData,
-        });
+        sendResponse({ success: true, suitesData: suitesDataResponse.suitesData });
         return;
       } else {
         sendResponse(suitesDataResponse);
@@ -976,10 +805,7 @@ async function fetchCompaniesAndSuites() {
   }
   accessToken = tokenResponse.accessToken;
   const clientCreds = await decryptClientCredentials();
-  if (!clientCreds)
-    return {
-      error: "Unable to decrypt credentials. Please re-enter password.",
-    };
+  if (!clientCreds) return { error: "Unable to decrypt credentials. Please re-enter password." };
   const { client_id } = clientCreds;
   const { org_id } = await chrome.storage.local.get(["org_id"]);
   const resp = await fetch(analyticsDiscoveryUrl, {
@@ -1000,24 +826,14 @@ async function fetchReportSuites(companyId) {
   }
   accessToken = tokenResponse.accessToken;
   const clientCreds = await decryptClientCredentials();
-  if (!clientCreds)
-    return {
-      error: "Unable to decrypt credentials. Please re-enter password.",
-    };
+  if (!clientCreds) return { error: "Unable to decrypt credentials. Please re-enter password." };
   const { client_id } = clientCreds;
   await chrome.storage.local.set({
     selectedCompanyID: companyId,
   });
-  const suitesResp = await fetch(
-    `https://analytics.adobe.io/api/${companyId}/collections/suites?limit=30&expansion=timezoneZoneinfo`,
-    {
-      headers: {
-        Authorization: `Bearer ${accessToken}`,
-        "x-api-key": client_id,
-        "x-proxy-global-company-id": companyId,
-      },
-    },
-  );
+  const suitesResp = await fetch(`https://analytics.adobe.io/api/${companyId}/collections/suites?limit=30&expansion=timezoneZoneinfo`, {
+    headers: { Authorization: `Bearer ${accessToken}`, "x-api-key": client_id, "x-proxy-global-company-id": companyId },
+  });
   const suitesData = await suitesResp.json();
   if (suitesData.error_code) {
     return { ...suitesData, reauthenticate: true };
@@ -1032,8 +848,7 @@ async function getValidAccessToken() {
       const cachedKey = await getCachedDerivedKey();
 
       if (cachedKey) {
-        const { wrappedSessionKey } =
-          await chrome.storage.local.get(WRAPPED_KEY_STORAGE);
+        const { wrappedSessionKey } = await chrome.storage.local.get(WRAPPED_KEY_STORAGE);
 
         if (wrappedSessionKey) {
           sessionKey = await unwrapSessionKey(wrappedSessionKey, cachedKey);
@@ -1105,14 +920,8 @@ async function refreshAccessToken(refreshToken) {
 
     let expires_at = Date.now() + (tokenData.expires_in || 3600) * 1000;
     let encryptedRefreshToken, encryptedAccessToken;
-    encryptedRefreshToken = await encryptData(
-      tokenData.refresh_token,
-      sessionKey,
-    );
-    encryptedAccessToken = await encryptData(
-      tokenData.access_token,
-      sessionKey,
-    );
+    encryptedRefreshToken = await encryptData(tokenData.refresh_token, sessionKey);
+    encryptedAccessToken = await encryptData(tokenData.access_token, sessionKey);
     await chrome.storage.local.set({
       accessToken: encryptedAccessToken,
       refreshToken: encryptedRefreshToken,
@@ -1139,10 +948,7 @@ async function fetchDimensions(companyId, rsid) {
     }
     let accessToken = tokenResponse.accessToken;
     const clientCreds = await decryptClientCredentials();
-    if (!clientCreds)
-      return {
-        error: "Unable to decrypt credentials. Please re-enter password.",
-      };
+    if (!clientCreds) return { error: "Unable to decrypt credentials. Please re-enter password." };
     const { client_id } = clientCreds;
 
     const resp = await fetch(
@@ -1160,19 +966,14 @@ async function fetchDimensions(companyId, rsid) {
     const data = await resp.json();
 
     if (data.error_code) {
-      return {
-        error: data.message || "Failed to fetch dimensions.",
-        success: false,
-      };
+      return { error: data.message || "Failed to fetch dimensions.", success: false };
     }
 
     // Filter to only props and eVars (including classified sub-dimensions)
     const filtered = data
       .filter((dim) => {
         const id = dim.id || "";
-        return (
-          id.startsWith("variables/prop") || id.startsWith("variables/evar")
-        );
+        return id.startsWith("variables/prop") || id.startsWith("variables/evar");
       })
       .map((dim) => {
         const id = dim.id;
@@ -1201,13 +1002,7 @@ async function fetchDimensions(companyId, rsid) {
 }
 
 // Fetch top N values for a specific dimension (last 30 days)
-async function fetchDimensionValues(
-  companyId,
-  rsid,
-  dimensionId,
-  limit = 50,
-  segmentFilter = null,
-) {
+async function fetchDimensionValues(companyId, rsid, dimensionId, limit = 50, segmentFilter = null) {
   try {
     let tokenResponse = await getValidAccessToken();
     if (tokenResponse.success !== true) {
@@ -1215,14 +1010,9 @@ async function fetchDimensionValues(
     }
     let accessToken = tokenResponse.accessToken;
     const clientCreds = await decryptClientCredentials();
-    if (!clientCreds)
-      return {
-        error: "Unable to decrypt credentials. Please re-enter password.",
-      };
+    if (!clientCreds) return { error: "Unable to decrypt credentials. Please re-enter password." };
     const { client_id } = clientCreds;
-    const { reportSuiteTimezone } = await chrome.storage.local.get([
-      "reportSuiteTimezone",
-    ]);
+    const { reportSuiteTimezone } = await chrome.storage.local.get(["reportSuiteTimezone"]);
 
     // Calculate last 30 days date range using report suite timezone
     const today = getTodayInTimezone(reportSuiteTimezone);
@@ -1230,7 +1020,7 @@ async function fetchDimensionValues(
     endDate.setDate(today.getDate() + 1);
     const startDate = new Date(today);
     startDate.setDate(today.getDate() - 29);
-
+    
     const dateRangeString = `${formatLocalDate(startDate)}T00:00:00.000/${formatLocalDate(endDate)}T00:00:00.000`;
 
     // Build global filters
@@ -1298,17 +1088,12 @@ async function fetchDimensionValues(
     const reportData = await resp.json();
 
     if (reportData.error_code) {
-      return {
-        error: reportData.message || "Failed to fetch dimension values.",
-        success: false,
-      };
+      return { error: reportData.message || "Failed to fetch dimension values.", success: false };
     }
 
     const rows = reportData?.rows || [];
     const values = rows
-      .filter(
-        (row) => row.value && row.value !== "Unspecified" && row.value !== "",
-      )
+      .filter((row) => row.value && row.value !== "Unspecified" && row.value !== "")
       .map((row) => ({
         value: row.value,
         count: row.data?.[0] || 0,
@@ -1327,18 +1112,10 @@ async function fetchDimensionValues(
 
 // Derive an AES-GCM key from a password (PBKDF2)
 async function deriveKeyFromPassword(password, saltBase64) {
-  const salt = saltBase64
-    ? Uint8Array.from(atob(saltBase64), (c) => c.charCodeAt(0))
-    : crypto.getRandomValues(new Uint8Array(16));
+  const salt = saltBase64 ? Uint8Array.from(atob(saltBase64), (c) => c.charCodeAt(0)) : crypto.getRandomValues(new Uint8Array(16));
   const enc = new TextEncoder();
 
-  const keyMaterial = await crypto.subtle.importKey(
-    "raw",
-    enc.encode(password),
-    { name: "PBKDF2" },
-    false,
-    ["deriveKey"],
-  );
+  const keyMaterial = await crypto.subtle.importKey("raw", enc.encode(password), { name: "PBKDF2" }, false, ["deriveKey"]);
 
   const key = await crypto.subtle.deriveKey(
     {
@@ -1360,11 +1137,7 @@ async function deriveKeyFromPassword(password, saltBase64) {
 async function encryptData(plainText, key) {
   const iv = crypto.getRandomValues(new Uint8Array(12));
   const encoded = new TextEncoder().encode(plainText);
-  const cipher = await crypto.subtle.encrypt(
-    { name: "AES-GCM", iv },
-    key,
-    encoded,
-  );
+  const cipher = await crypto.subtle.encrypt({ name: "AES-GCM", iv }, key, encoded);
   const combined = new Uint8Array(iv.byteLength + cipher.byteLength);
   combined.set(iv, 0);
   combined.set(new Uint8Array(cipher), iv.byteLength);
@@ -1376,26 +1149,14 @@ async function decryptData(encryptedBase64, key) {
   const data = Uint8Array.from(atob(encryptedBase64), (c) => c.charCodeAt(0));
   const iv = data.slice(0, 12);
   const cipher = data.slice(12);
-  const plainBuffer = await crypto.subtle.decrypt(
-    { name: "AES-GCM", iv },
-    key,
-    cipher,
-  );
+  const plainBuffer = await crypto.subtle.decrypt({ name: "AES-GCM", iv }, key, cipher);
   return new TextDecoder().decode(plainBuffer);
 }
 
 // --------------------------------------
 // 🔒 Encrypt and Store Credentials Securely
 // --------------------------------------
-async function encryptAndStoreCredentials(
-  password,
-  accessToken,
-  refreshToken,
-  client_id,
-  client_secret,
-  org_id,
-  expires_at,
-) {
+async function encryptAndStoreCredentials(password, accessToken, refreshToken, client_id, client_secret, org_id, expires_at) {
   const { key: derivedKey, saltBase64 } = await deriveKeyFromPassword(password);
 
   // create random session key
@@ -1439,21 +1200,14 @@ async function validatePassword(password) {
   if (!password) return false;
 
   const { saltBase64 } = await chrome.storage.local.get(["saltBase64"]);
-  const { wrappedSessionKey } =
-    await chrome.storage.local.get(WRAPPED_KEY_STORAGE);
+  const { wrappedSessionKey } = await chrome.storage.local.get(WRAPPED_KEY_STORAGE);
 
   if (!saltBase64 || !wrappedSessionKey) return false;
 
   try {
-    const { key: derivedKey } = await deriveKeyFromPassword(
-      password,
-      saltBase64,
-    );
+    const { key: derivedKey } = await deriveKeyFromPassword(password, saltBase64);
 
-    const unwrappedSessionKey = await unwrapSessionKey(
-      wrappedSessionKey,
-      derivedKey,
-    );
+    const unwrappedSessionKey = await unwrapSessionKey(wrappedSessionKey, derivedKey);
 
     setSessionKey(unwrappedSessionKey);
     await cacheDerivedKey(derivedKey);
@@ -1471,10 +1225,7 @@ async function validatePassword(password) {
 async function migrateClientCredentials() {
   if (!sessionKey) return;
   try {
-    const { client_id, client_secret } = await chrome.storage.local.get([
-      "client_id",
-      "client_secret",
-    ]);
+    const { client_id, client_secret } = await chrome.storage.local.get(["client_id", "client_secret"]);
     if (!client_id || !client_secret) return;
 
     // Try decrypting — if it works, already encrypted, skip migration
@@ -1501,10 +1252,7 @@ async function migrateClientCredentials() {
 // 🔓 Decrypt Stored Credentials
 // --------------------------------------
 async function decryptStoredCredentials(key) {
-  let { accessToken, refreshToken } = await chrome.storage.local.get([
-    "accessToken",
-    "refreshToken",
-  ]);
+  let { accessToken, refreshToken } = await chrome.storage.local.get(["accessToken", "refreshToken"]);
 
   if (!accessToken || !refreshToken) {
     console.warn("No encrypted tokens found. Reauthentication required.");
@@ -1525,17 +1273,11 @@ async function decryptStoredCredentials(key) {
 async function decryptClientCredentials() {
   if (!sessionKey) return null;
   try {
-    const { client_id, client_secret } = await chrome.storage.local.get([
-      "client_id",
-      "client_secret",
-    ]);
+    const { client_id, client_secret } = await chrome.storage.local.get(["client_id", "client_secret"]);
     if (!client_id || !client_secret) return null;
     const decryptedClientId = await decryptData(client_id, sessionKey);
     const decryptedClientSecret = await decryptData(client_secret, sessionKey);
-    return {
-      client_id: decryptedClientId,
-      client_secret: decryptedClientSecret,
-    };
+    return { client_id: decryptedClientId, client_secret: decryptedClientSecret };
   } catch {
     return null;
   }
@@ -1546,19 +1288,13 @@ async function decryptClientCredentials() {
 // --------------------------------------
 
 async function generateSessionKey() {
-  return crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, [
-    "encrypt",
-    "decrypt",
-  ]);
+  return crypto.subtle.generateKey({ name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]);
 }
 
 async function wrapSessionKey(sessionKey, derivedKey) {
   const iv = crypto.getRandomValues(new Uint8Array(12));
 
-  const wrapped = await crypto.subtle.wrapKey("raw", sessionKey, derivedKey, {
-    name: "AES-GCM",
-    iv,
-  });
+  const wrapped = await crypto.subtle.wrapKey("raw", sessionKey, derivedKey, { name: "AES-GCM", iv });
 
   const combined = new Uint8Array(iv.length + wrapped.byteLength);
   combined.set(iv, 0);
@@ -1573,15 +1309,7 @@ async function unwrapSessionKey(wrappedBase64, derivedKey) {
   const iv = data.slice(0, 12);
   const cipher = data.slice(12);
 
-  return crypto.subtle.unwrapKey(
-    "raw",
-    cipher,
-    derivedKey,
-    { name: "AES-GCM", iv },
-    { name: "AES-GCM", length: 256 },
-    true,
-    ["encrypt", "decrypt"],
-  );
+  return crypto.subtle.unwrapKey("raw", cipher, derivedKey, { name: "AES-GCM", iv }, { name: "AES-GCM", length: 256 }, true, ["encrypt", "decrypt"]);
 }
 
 async function cacheDerivedKey(key) {
@@ -1597,14 +1325,7 @@ async function getCachedDerivedKey() {
   const res = await chrome.storage.session.get(DERIVED_KEY_SESSION);
   if (!res[DERIVED_KEY_SESSION]) return null;
 
-  const raw = Uint8Array.from(atob(res[DERIVED_KEY_SESSION]), (c) =>
-    c.charCodeAt(0),
-  );
+  const raw = Uint8Array.from(atob(res[DERIVED_KEY_SESSION]), (c) => c.charCodeAt(0));
 
-  return crypto.subtle.importKey("raw", raw, { name: "AES-GCM" }, false, [
-    "encrypt",
-    "decrypt",
-    "wrapKey",
-    "unwrapKey",
-  ]);
+  return crypto.subtle.importKey("raw", raw, { name: "AES-GCM" }, false, ["encrypt", "decrypt", "wrapKey", "unwrapKey"]);
 }
