@@ -28,21 +28,14 @@ document.addEventListener("DOMContentLoaded", async () => {
   let client_secretElem = document.getElementById("clientSecret");
   let org_idElem = document.getElementById("orgid");
 
-  // client_id and client_secret are now encrypted — try to decrypt
+  // client_id and client_secret are encrypted — mask fields if already stored
   if (storedClientId) {
-    const resp = await chrome.runtime.sendMessage({ type: "GET_DECRYPTED_CLIENT_CREDS" });
-    if (resp && resp.success) {
-      client_idElem.value = resp.client_id;
-      client_idElem.disabled = true;
-      client_secretElem.value = resp.client_secret;
-      client_secretElem.disabled = true;
-    } else {
-      // Session expired — show masked placeholder
-      client_idElem.value = "••••••••••••••••";
-      client_idElem.disabled = true;
-      client_secretElem.value = "••••••••••••••••";
-      client_secretElem.disabled = true;
-    }
+    client_idElem.value = "encrypted-credentials-saved";
+    client_idElem.type = "password";
+    client_idElem.disabled = true;
+    client_secretElem.value = "encrypted-credentials-saved";
+    client_secretElem.type = "password";
+    client_secretElem.disabled = true;
   }
   if (org_id) {
     org_idElem.value = org_id;
@@ -759,12 +752,6 @@ retrieveAccessTokenBtn.addEventListener("click", async () => {
           msg: "Password validated. Kindly return back to website and Refresh the page to fetch data.",
           type: "success",
         });
-        // Restore encrypted client fields now that session key is available
-        const credsResp = await chrome.runtime.sendMessage({ type: "GET_DECRYPTED_CLIENT_CREDS" });
-        if (credsResp && credsResp.success) {
-          document.getElementById("clientId").value = credsResp.client_id;
-          document.getElementById("clientSecret").value = credsResp.client_secret;
-        }
         populateStep2andStep3Fields(false);
         retrieveAccessTokenBtn.hidden = true;
         authBtn.disabled = true;
