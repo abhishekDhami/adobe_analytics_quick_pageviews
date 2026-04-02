@@ -87,7 +87,6 @@ function getDateRangeForPreset(presetKey, reportSuiteTimezone) {
     limit = preset.months;
   }
 
-  
   const dateRangeString = `${formatLocalDate(startDate)}T00:00:00.000/${formatLocalDate(endDate)}T00:00:00.000`;
 
   return {
@@ -137,66 +136,66 @@ function safeAdobeTruncate(inpString, byteLimit = 100) {
 }
 
 //all the actions from the content scripts
-chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  if (msg.action === "GET_TOKEN_VALIDITY") {
-    getValidAccessToken().then((resp) => {
-      sendResponse(resp);
-    });
-    return true;
-  } else if (msg.action === "OPEN_EXTENSION_OPTION") {
-    chrome.runtime.openOptionsPage();
-    chrome.runtime.sendMessage({ type: "RECHECK_TOKEN_STATUS" }, (res) => {
-      if (chrome.runtime.lastError) {
-        return;
-      }
-    });
-  } else if (msg.action === "GET_ENABLED_ON_PAGE_FLAG") {
-    getEnableOnPageFlag().then((isEnabled) => {
-      sendResponse({ isEnabled });
-    });
-  } else if (msg.action === "GET_PAGE_IDENTIFIERS") {
-    chrome.storage.local.get(["pageIdentifierConfig"], (result) => {
-      let pageIdentifier = {};
-      let config = result.pageIdentifierConfig;
-      if (config) {
-        pageIdentifier.source = config.source;
-        pageIdentifier.windowPath = config.windowPathConfig.windowPath;
-        sendResponse({ pageIdentifier: pageIdentifier, success: true });
-      } else {
-        sendResponse({ success: false });
-      }
-    });
-  } else if (msg.action === "GET_REPORT") {
-    getReport(msg.pageIdentifier, msg.reportType, msg.datePreset).then((reportData) => {
-      sendResponse(reportData);
-    });
-    return true;
-  } else if (msg.action === "GET_DATE_PRESET") {
-    chrome.storage.local.get(["datePreset"], (result) => {
-      sendResponse({ datePreset: result.datePreset || "7d" });
-    });
-  } else if (msg.action === "SET_DATE_PRESET") {
-    chrome.storage.local.set({ datePreset: msg.datePreset }, () => {
-      sendResponse({ success: true });
-    });
-  } else if (msg.action === "FETCH_DIMENSIONS") {
-    fetchDimensions(msg.companyId, msg.rsid).then((resp) => {
-      sendResponse(resp);
-    });
-    return true;
-  } else if (msg.action === "FETCH_DIMENSION_VALUES") {
-    fetchDimensionValues(msg.companyId, msg.rsid, msg.dimensionId, msg.limit, msg.segmentFilter).then((resp) => {
-      sendResponse(resp);
-    });
-    return true;
-  } else if (msg.action === "GET_CUSTOM_REPORT") {
-    getCustomReport(msg.pageIdentifier, msg.reportType, msg.datePreset, msg.customFilters).then((reportData) => {
-      sendResponse(reportData);
-    });
-    return true;
-  }
-  return true;
-});
+// chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
+//   if (msg.action === "GET_TOKEN_VALIDITY") {
+//     getValidAccessToken().then((resp) => {
+//       sendResponse(resp);
+//     });
+//     return true;
+//   } else if (msg.action === "OPEN_EXTENSION_OPTION") {
+//     chrome.runtime.openOptionsPage();
+//     chrome.runtime.sendMessage({ type: "RECHECK_TOKEN_STATUS" }, (res) => {
+//       if (chrome.runtime.lastError) {
+//         return;
+//       }
+//     });
+//   } else if (msg.action === "GET_ENABLED_ON_PAGE_FLAG") {
+//     getEnableOnPageFlag().then((isEnabled) => {
+//       sendResponse({ isEnabled });
+//     });
+//   } else if (msg.action === "GET_PAGE_IDENTIFIERS") {
+//     chrome.storage.local.get(["pageIdentifierConfig"], (result) => {
+//       let pageIdentifier = {};
+//       let config = result.pageIdentifierConfig;
+//       if (config) {
+//         pageIdentifier.source = config.source;
+//         pageIdentifier.windowPath = config.windowPathConfig.windowPath;
+//         sendResponse({ pageIdentifier: pageIdentifier, success: true });
+//       } else {
+//         sendResponse({ success: false });
+//       }
+//     });
+//   } else if (msg.action === "GET_REPORT") {
+//     getReport(msg.pageIdentifier, msg.reportType, msg.datePreset).then((reportData) => {
+//       sendResponse(reportData);
+//     });
+//     return true;
+//   } else if (msg.action === "GET_DATE_PRESET") {
+//     chrome.storage.local.get(["datePreset"], (result) => {
+//       sendResponse({ datePreset: result.datePreset || "7d" });
+//     });
+//   } else if (msg.action === "SET_DATE_PRESET") {
+//     chrome.storage.local.set({ datePreset: msg.datePreset }, () => {
+//       sendResponse({ success: true });
+//     });
+//   } else if (msg.action === "FETCH_DIMENSIONS") {
+//     fetchDimensions(msg.companyId, msg.rsid).then((resp) => {
+//       sendResponse(resp);
+//     });
+//     return true;
+//   } else if (msg.action === "FETCH_DIMENSION_VALUES") {
+//     fetchDimensionValues(msg.companyId, msg.rsid, msg.dimensionId, msg.limit, msg.segmentFilter).then((resp) => {
+//       sendResponse(resp);
+//     });
+//     return true;
+//   } else if (msg.action === "GET_CUSTOM_REPORT") {
+//     getCustomReport(msg.pageIdentifier, msg.reportType, msg.datePreset, msg.customFilters).then((reportData) => {
+//       sendResponse(reportData);
+//     });
+//     return true;
+//   }
+//   return true;
+// });
 
 async function getEnableOnPageFlag() {
   const { enableOnPage } = await chrome.storage.local.get("enableOnPage");
@@ -207,9 +206,17 @@ async function getEnableOnPageFlag() {
 function getReport(pageIdentifier, reportType = "pageViews", datePreset = "7d") {
   return new Promise(async (resolve, reject) => {
     try {
-      const { selectedCompanyID, selectedrsID, pageIdentifierConfig, reportSuiteTimezone } = await chrome.storage.local.get(["selectedCompanyID", "selectedrsID", "pageIdentifierConfig", "reportSuiteTimezone"]);
+      const { selectedCompanyID, selectedrsID, pageIdentifierConfig, reportSuiteTimezone } = await chrome.storage.local.get([
+        "selectedCompanyID",
+        "selectedrsID",
+        "pageIdentifierConfig",
+        "reportSuiteTimezone",
+      ]);
       const clientCreds = await decryptClientCredentials();
-      if (!clientCreds) { resolve({ reportData: null, success: false }); return; }
+      if (!clientCreds) {
+        resolve({ reportData: null, success: false });
+        return;
+      }
       const client_id = clientCreds.client_id;
 
       if (pageIdentifier == undefined) resolve(null);
@@ -280,7 +287,14 @@ function getReport(pageIdentifier, reportType = "pageViews", datePreset = "7d") 
       }
 
       //Reading data from Cache first — include datePreset in cache key
-      let cacheReadResponse = await readCache(selectedrsID, pageIdentifier.value, pageIdentifierConfig.adobeDimensionConfig.dimension, pageIdentifierConfig.adobeDimensionConfig.match, reportType, datePreset);
+      let cacheReadResponse = await readCache(
+        selectedrsID,
+        pageIdentifier.value,
+        pageIdentifierConfig.adobeDimensionConfig.dimension,
+        pageIdentifierConfig.adobeDimensionConfig.match,
+        reportType,
+        datePreset,
+      );
       if (cacheReadResponse.data != null && cacheReadResponse.hit === true) {
         resolve({ reportData: cacheReadResponse.data, success: true, fromCache: true });
         return;
@@ -430,7 +444,10 @@ function getCustomReport(pageIdentifier, reportType = "pageViews", datePreset = 
     try {
       const { selectedCompanyID, selectedrsID, reportSuiteTimezone } = await chrome.storage.local.get(["selectedCompanyID", "selectedrsID", "reportSuiteTimezone"]);
       const clientCreds = await decryptClientCredentials();
-      if (!clientCreds) { resolve({ reportData: null, success: false }); return; }
+      if (!clientCreds) {
+        resolve({ reportData: null, success: false });
+        return;
+      }
       const client_id = clientCreds.client_id;
 
       if (!customFilters.primaryDimension || !customFilters.primaryValue) {
@@ -460,7 +477,9 @@ function getCustomReport(pageIdentifier, reportType = "pageViews", datePreset = 
       }
 
       // Build metrics and dimension
-      let metricsArray = [], rowDimension = "", customSettings = {};
+      let metricsArray = [],
+        rowDimension = "",
+        customSettings = {};
       if (reportType === "countryData") {
         metricsArray = [{ id: "metrics/pageviews", columnId: "0", sort: "desc" }];
         rowDimension = "variables/geocountry";
@@ -683,11 +702,13 @@ chrome.runtime.onMessage.addListener(async (msg, sender, sendResponse) => {
   switch (msg.type) {
     case "GET_TOKEN_VALIDITY":
       const resp = await getValidAccessToken();
-      sendResponse(resp);
+      //remove sendResponse(resp);
+      sendResponseMessage("GET_TOKEN_VALIDITY_RESPONSE", resp);
       break;
     case "GET_KEY_STATUS":
       let hasKey = sessionKey !== null ? true : false;
-      sendResponse({ hasKey: hasKey });
+      //remove sendResponse({ hasKey: hasKey });
+      sendResponseMessage("GET_KEY_STATUS_RESPONSE", { hasKey: hasKey });
       break;
 
     case "GET_DECRYPTED_CLIENT_CREDS":
@@ -695,9 +716,11 @@ chrome.runtime.onMessage.addListener(async (msg, sender, sendResponse) => {
       await migrateClientCredentials();
       const creds = await decryptClientCredentials();
       if (creds) {
-        sendResponse({ success: true, client_id: creds.client_id, client_secret: creds.client_secret });
+        //remove sendResponse({ success: true, client_id: creds.client_id, client_secret: creds.client_secret });
+        sendResponseMessage("GET_DECRYPTED_CLIENT_CREDS_RESPONSE", { success: true, client_id: creds.client_id, client_secret: creds.client_secret });
       } else {
-        sendResponse({ success: false });
+        //remove sendResponse({ success: false });
+        sendResponseMessage("GET_DECRYPTED_CLIENT_CREDS_RESPONSE", { success: false });
       }
       break;
 
@@ -719,7 +742,8 @@ chrome.runtime.onMessage.addListener(async (msg, sender, sendResponse) => {
       chrome.identity.launchWebAuthFlow({ url: authUrlwithParam, interactive: true }, async (redirectResponse) => {
         try {
           if (chrome.runtime.lastError || !redirectResponse) {
-            sendResponse({ error: "Authentication failed. Please try again with valid credentials" });
+            //remove sendResponse({ error: "Authentication failed. Please try again with valid credentials" });
+            sendResponseMessage("AUTHENTICATE_USER_RESPONSE", { error: "Authentication failed. Please try again with valid credentials" });
             return;
           }
           const code = new URL(redirectResponse).searchParams.get("code");
@@ -742,7 +766,8 @@ chrome.runtime.onMessage.addListener(async (msg, sender, sendResponse) => {
           if (!tokenData.access_token) {
             let msg = "Token fetch failed. Please try again with valid credentials.";
             if (tokenData.error) msg += ` Error: ${tokenData.error}`;
-            sendResponse({ error: msg });
+            //remove sendResponse({ error: msg });
+            sendResponseMessage("AUTHENTICATE_USER_RESPONSE", { error: msg });
             return;
           }
 
@@ -751,15 +776,19 @@ chrome.runtime.onMessage.addListener(async (msg, sender, sendResponse) => {
           await encryptAndStoreCredentials(userpassword, tokenData.access_token, tokenData.refresh_token, client_id, client_secret, org_id, expires_at);
           let companyDataResponse = await fetchCompaniesAndSuites();
           if (companyDataResponse.success) {
-            sendResponse({ success: true, companiesData: companyDataResponse.data });
+            //remove sendResponse({ success: true, companiesData: companyDataResponse.data });
+            sendResponseMessage("AUTHENTICATE_USER_RESPONSE", { success: true, companiesData: companyDataResponse.data });
             return;
           } else {
-            sendResponse(companyDataResponse);
+            //remove sendResponse(companyDataResponse);
+            sendResponseMessage("AUTHENTICATE_USER_RESPONSE", companyDataResponse);
             return;
           }
         } catch (error) {
-          sendResponse({ error: "An error occurred during authentication. Please try with valid credentials." });
+          //remove sendResponse({ error: "An error occurred during authentication. Please try with valid credentials." });
+          sendResponseMessage("AUTHENTICATE_USER_RESPONSE", { error: "An error occurred during authentication. Please try with valid credentials." });
           console.log(error);
+          return;
         }
       });
       break;
@@ -767,10 +796,12 @@ chrome.runtime.onMessage.addListener(async (msg, sender, sendResponse) => {
     case "FETCH_COMPANIES":
       let companyDataResponse = await fetchCompaniesAndSuites();
       if (companyDataResponse.success) {
-        sendResponse({ success: true, companiesData: companyDataResponse.data });
+        //remove sendResponse({ success: true, companiesData: companyDataResponse.data });
+        sendResponseMessage("FETCH_COMPANIES_RESPONSE", { success: true, companiesData: companyDataResponse.data });
         return;
       } else {
-        sendResponse(companyDataResponse);
+        //remove sendResponse(companyDataResponse);
+        sendResponseMessage("FETCH_COMPANIES_RESPONSE", companyDataResponse);
         return;
       }
       break;
@@ -779,23 +810,103 @@ chrome.runtime.onMessage.addListener(async (msg, sender, sendResponse) => {
       let companyId = msg.companyId;
       let suitesDataResponse = await fetchReportSuites(companyId);
       if (suitesDataResponse.success) {
-        sendResponse({ success: true, suitesData: suitesDataResponse.suitesData });
+        //remove sendResponse({ success: true, suitesData: suitesDataResponse.suitesData });
+        sendResponseMessage("FETCH_REPORT_SUITES_RESPONSE", { success: true, suitesData: suitesDataResponse.suitesData });
         return;
       } else {
-        sendResponse(suitesDataResponse);
+        //remove sendResponse(suitesDataResponse);
+        sendResponseMessage("FETCH_REPORT_SUITES_RESPONSE", suitesDataResponse);
         return;
       }
       break;
 
     case "VALIDATE_PASSWORD":
       let isPasswordValid = await validatePassword(msg.password);
-      sendResponse({ isPasswordValid });
+      //remove sendResponse({ isPasswordValid });
+      sendResponseMessage("VALIDATE_PASSWORD_RESPONSE", { isPasswordValid });
+      break;
+
+    case "OPEN_EXTENSION_OPTION":
+      chrome.runtime.openOptionsPage();
+      chrome.runtime.sendMessage({ type: "RECHECK_TOKEN_STATUS" }, (res) => {
+        if (chrome.runtime.lastError) {
+          return;
+        }
+      });
+      break;
+
+    case "GET_ENABLED_ON_PAGE_FLAG":
+      getEnableOnPageFlag().then((isEnabled) => {
+        //remove sendResponse({ isEnabled });
+        sendResponseMessage("GET_ENABLED_ON_PAGE_FLAG_RESPONSE", { isEnabled });
+      });
+      break;
+
+    case "GET_PAGE_IDENTIFIERS":
+      chrome.storage.local.get(["pageIdentifierConfig"], (result) => {
+        let pageIdentifier = {};
+        let config = result.pageIdentifierConfig;
+        if (config) {
+          pageIdentifier.source = config.source;
+          pageIdentifier.windowPath = config.windowPathConfig.windowPath;
+          //remove sendResponse({ pageIdentifier: pageIdentifier, success: true });
+          sendResponseMessage("GET_PAGE_IDENTIFIERS_RESPONSE", { pageIdentifier: pageIdentifier, success: true });
+        } else {
+          //remove sendResponse({ success: false });
+          sendResponseMessage("GET_PAGE_IDENTIFIERS_RESPONSE", { success: false });
+        }
+      });
+      break;
+
+    case "GET_REPORT":
+      getReport(msg.pageIdentifier, msg.reportType, msg.datePreset).then((reportData) => {
+        //remove sendResponse(reportData);
+        sendResponseMessage("GET_REPORT_RESPONSE", reportData);
+      });
+      return true;
+      break;
+    case "GET_DATE_PRESET":
+      chrome.storage.local.get(["datePreset"], (result) => {
+        //remove sendResponse({ datePreset: result.datePreset || "7d" });
+        sendResponseMessage("GET_DATE_PRESET_RESPONSE", { datePreset: result.datePreset || "7d" });
+      });
+      break;
+    case "SET_DATE_PRESET":
+      chrome.storage.local.set({ datePreset: msg.datePreset }, () => {
+        //remove sendResponse({ success: true });
+        sendResponseMessage("SET_DATE_PRESET_RESPONSE", { success: true });
+      });
+      break;
+    case "FETCH_DIMENSIONS":
+      fetchDimensions(msg.companyId, msg.rsid).then((resp) => {
+        //remove sendResponse(resp);
+        sendResponseMessage("FETCH_DIMENSIONS_RESPONSE", resp);
+      });
+      return true;
+      break;
+    case "FETCH_DIMENSION_VALUES":
+      fetchDimensionValues(msg.companyId, msg.rsid, msg.dimensionId, msg.limit, msg.segmentFilter).then((resp) => {
+        //remove sendResponse(resp);
+        sendResponseMessage("FETCH_DIMENSION_VALUES_RESPONSE", resp);
+      });
+      return true;
+      break;
+    case "GET_CUSTOM_REPORT":
+      getCustomReport(msg.pageIdentifier, msg.reportType, msg.datePreset, msg.customFilters).then((reportData) => {
+        //remove sendResponse(reportData);
+        sendResponseMessage("GET_CUSTOM_REPORT_RESPONSE", reportData);
+      });
+      return true;
       break;
   }
 
   // Required for async sendResponse usage
   return true;
 });
+
+function sendResponseMessage(type, payload) {
+  chrome.runtime.sendMessage({ type, ...payload });
+}
 
 async function fetchCompaniesAndSuites() {
   let tokenResponse = await getValidAccessToken();
@@ -951,17 +1062,14 @@ async function fetchDimensions(companyId, rsid) {
     if (!clientCreds) return { error: "Unable to decrypt credentials. Please re-enter password." };
     const { client_id } = clientCreds;
 
-    const resp = await fetch(
-      `${reportingAPIURL}/${companyId}/dimensions?rsid=${encodeURIComponent(rsid)}&locale=en_US&expansion=tags,extraTitleInfo`,
-      {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          "x-api-key": client_id,
-          "x-proxy-global-company-id": companyId,
-          Accept: "application/json",
-        },
+    const resp = await fetch(`${reportingAPIURL}/${companyId}/dimensions?rsid=${encodeURIComponent(rsid)}&locale=en_US&expansion=tags,extraTitleInfo`, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "x-api-key": client_id,
+        "x-proxy-global-company-id": companyId,
+        Accept: "application/json",
       },
-    );
+    });
 
     const data = await resp.json();
 
@@ -1020,7 +1128,7 @@ async function fetchDimensionValues(companyId, rsid, dimensionId, limit = 50, se
     endDate.setDate(today.getDate() + 1);
     const startDate = new Date(today);
     startDate.setDate(today.getDate() - 29);
-    
+
     const dateRangeString = `${formatLocalDate(startDate)}T00:00:00.000/${formatLocalDate(endDate)}T00:00:00.000`;
 
     // Build global filters
