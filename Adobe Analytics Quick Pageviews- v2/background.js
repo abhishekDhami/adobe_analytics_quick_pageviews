@@ -135,68 +135,6 @@ function safeAdobeTruncate(inpString, byteLimit = 100) {
   }
 }
 
-//all the actions from the content scripts
-// chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-//   if (msg.action === "GET_TOKEN_VALIDITY") {
-//     getValidAccessToken().then((resp) => {
-//       sendResponse(resp);
-//     });
-//     return true;
-//   } else if (msg.action === "OPEN_EXTENSION_OPTION") {
-//     chrome.runtime.openOptionsPage();
-//     chrome.runtime.sendMessage({ type: "RECHECK_TOKEN_STATUS" }, (res) => {
-//       if (chrome.runtime.lastError) {
-//         return;
-//       }
-//     });
-//   } else if (msg.action === "GET_ENABLED_ON_PAGE_FLAG") {
-//     getEnableOnPageFlag().then((isEnabled) => {
-//       sendResponse({ isEnabled });
-//     });
-//   } else if (msg.action === "GET_PAGE_IDENTIFIERS") {
-//     chrome.storage.local.get(["pageIdentifierConfig"], (result) => {
-//       let pageIdentifier = {};
-//       let config = result.pageIdentifierConfig;
-//       if (config) {
-//         pageIdentifier.source = config.source;
-//         pageIdentifier.windowPath = config.windowPathConfig.windowPath;
-//         sendResponse({ pageIdentifier: pageIdentifier, success: true });
-//       } else {
-//         sendResponse({ success: false });
-//       }
-//     });
-//   } else if (msg.action === "GET_REPORT") {
-//     getReport(msg.pageIdentifier, msg.reportType, msg.datePreset).then((reportData) => {
-//       sendResponse(reportData);
-//     });
-//     return true;
-//   } else if (msg.action === "GET_DATE_PRESET") {
-//     chrome.storage.local.get(["datePreset"], (result) => {
-//       sendResponse({ datePreset: result.datePreset || "7d" });
-//     });
-//   } else if (msg.action === "SET_DATE_PRESET") {
-//     chrome.storage.local.set({ datePreset: msg.datePreset }, () => {
-//       sendResponse({ success: true });
-//     });
-//   } else if (msg.action === "FETCH_DIMENSIONS") {
-//     fetchDimensions(msg.companyId, msg.rsid).then((resp) => {
-//       sendResponse(resp);
-//     });
-//     return true;
-//   } else if (msg.action === "FETCH_DIMENSION_VALUES") {
-//     fetchDimensionValues(msg.companyId, msg.rsid, msg.dimensionId, msg.limit, msg.segmentFilter).then((resp) => {
-//       sendResponse(resp);
-//     });
-//     return true;
-//   } else if (msg.action === "GET_CUSTOM_REPORT") {
-//     getCustomReport(msg.pageIdentifier, msg.reportType, msg.datePreset, msg.customFilters).then((reportData) => {
-//       sendResponse(reportData);
-//     });
-//     return true;
-//   }
-//   return true;
-// });
-
 async function getEnableOnPageFlag() {
   const { enableOnPage } = await chrome.storage.local.get("enableOnPage");
   if (enableOnPage === undefined) return false;
@@ -698,54 +636,68 @@ function resetSessionTimer() {
 }
 
 // Listen for messages from options or popup
-chrome.runtime.onMessage.addListener(async (msg, sender, sendResponse) => {
-  switch (msg.type) {
-    case "GET_TOKEN_VALIDITY":
-      const resp = await getValidAccessToken();
-      //remove sendResponse(resp);
-      sendResponseMessage("GET_TOKEN_VALIDITY_RESPONSE", resp);
-      break;
-    case "GET_KEY_STATUS":
-      let hasKey = sessionKey !== null ? true : false;
-      //remove sendResponse({ hasKey: hasKey });
-      sendResponseMessage("GET_KEY_STATUS_RESPONSE", { hasKey: hasKey });
-      break;
+chrome.runtime.onMessage.addListener((msg, sender) => {
+  let args = msg.args || {};
 
-    case "GET_DECRYPTED_CLIENT_CREDS":
-      // Attempt migration first (handles existing users with plaintext creds)
+  const handlers = {
+    // =========================
+    // TOKEN
+    // =========================
+    GET_TOKEN_VALIDITY_OPTIONS: async () => {
+      let resp = await getValidAccessToken();
+      sendResponseMessage("GET_TOKEN_VALIDITY_OPTIONS_RESPONSE", resp, args);
+      return true;
+    },
+
+    GET_TOKEN_VALIDITY_CONTENT: async () => {
+      let response = await getValidAccessToken();
+      return response;
+    },
+
+    GET_KEY_STATUS: () => {
+      let hasKey = sessionKey !== null;
+      return { hasKey };
+    },
+
+    GET_DECRYPTED_CLIENT_CREDS: async () => {
       await migrateClientCredentials();
       const creds = await decryptClientCredentials();
-      if (creds) {
-        //remove sendResponse({ success: true, client_id: creds.client_id, client_secret: creds.client_secret });
-        sendResponseMessage("GET_DECRYPTED_CLIENT_CREDS_RESPONSE", { success: true, client_id: creds.client_id, client_secret: creds.client_secret });
-      } else {
-        //remove sendResponse({ success: false });
-        sendResponseMessage("GET_DECRYPTED_CLIENT_CREDS_RESPONSE", { success: false });
-      }
-      break;
 
-    case "AUTHENTICATE_USER":
-      let client_id = msg.client_id;
-      let client_secret = msg.client_secret;
-      let org_id = msg.org_id;
-      let userpassword = msg.userpassword;
+      if (creds) {
+        return {
+          success: true,
+          client_id: creds.client_id,
+          client_secret: creds.client_secret,
+        };
+      }
+      return { success: false };
+    },
+
+    // =========================
+    // AUTH (IMPORTANT: keep event-based)
+    // =========================
+    AUTHENTICATE_USER: async () => {
+      let { client_id, client_secret, org_id, userpassword } = msg;
+
       const redirectUri = chrome.identity.getRedirectURL();
       const scope = "additional_info.projectedProductContext, openid, read_organizations, additional_info.job_function, AdobeID";
+
       const params = new URLSearchParams({
         client_id,
         response_type: "code",
         redirect_uri: redirectUri,
         scope,
       });
+
       let authUrlwithParam = `${authUrl}?${params.toString()}`;
 
       chrome.identity.launchWebAuthFlow({ url: authUrlwithParam, interactive: true }, async (redirectResponse) => {
         try {
           if (chrome.runtime.lastError || !redirectResponse) {
-            //remove sendResponse({ error: "Authentication failed. Please try again with valid credentials" });
-            sendResponseMessage("AUTHENTICATE_USER_RESPONSE", { error: "Authentication failed. Please try again with valid credentials" });
+            sendResponseMessage("AUTHENTICATE_USER_RESPONSE", { error: "Authentication failed. Please try again." }, args);
             return;
           }
+
           const code = new URL(redirectResponse).searchParams.get("code");
 
           const body = new URLSearchParams({
@@ -764,148 +716,122 @@ chrome.runtime.onMessage.addListener(async (msg, sender, sendResponse) => {
           const tokenData = await tokenResp.json();
 
           if (!tokenData.access_token) {
-            let msg = "Token fetch failed. Please try again with valid credentials.";
-            if (tokenData.error) msg += ` Error: ${tokenData.error}`;
-            //remove sendResponse({ error: msg });
-            sendResponseMessage("AUTHENTICATE_USER_RESPONSE", { error: msg });
+            let msgErr = "Token fetch failed.";
+            if (tokenData.error) msgErr += ` Error: ${tokenData.error}`;
+
+            sendResponseMessage("AUTHENTICATE_USER_RESPONSE", { error: msgErr }, args);
             return;
           }
 
           let expires_at = Date.now() + (tokenData.expires_in || 3600) * 1000;
 
           await encryptAndStoreCredentials(userpassword, tokenData.access_token, tokenData.refresh_token, client_id, client_secret, org_id, expires_at);
+
           let companyDataResponse = await fetchCompaniesAndSuites();
-          if (companyDataResponse.success) {
-            //remove sendResponse({ success: true, companiesData: companyDataResponse.data });
-            sendResponseMessage("AUTHENTICATE_USER_RESPONSE", { success: true, companiesData: companyDataResponse.data });
-            return;
-          } else {
-            //remove sendResponse(companyDataResponse);
-            sendResponseMessage("AUTHENTICATE_USER_RESPONSE", companyDataResponse);
-            return;
-          }
+
+          sendResponseMessage("AUTHENTICATE_USER_RESPONSE", companyDataResponse.success ? { success: true, companiesData: companyDataResponse.data } : companyDataResponse, args);
         } catch (error) {
-          //remove sendResponse({ error: "An error occurred during authentication. Please try with valid credentials." });
-          sendResponseMessage("AUTHENTICATE_USER_RESPONSE", { error: "An error occurred during authentication. Please try with valid credentials." });
-          console.log(error);
-          return;
+          console.error(error);
+          sendResponseMessage("AUTHENTICATE_USER_RESPONSE", { error: "Authentication failed." }, args);
         }
       });
-      break;
 
-    case "FETCH_COMPANIES":
-      let companyDataResponse = await fetchCompaniesAndSuites();
-      if (companyDataResponse.success) {
-        //remove sendResponse({ success: true, companiesData: companyDataResponse.data });
-        sendResponseMessage("FETCH_COMPANIES_RESPONSE", { success: true, companiesData: companyDataResponse.data });
-        return;
-      } else {
-        //remove sendResponse(companyDataResponse);
-        sendResponseMessage("FETCH_COMPANIES_RESPONSE", companyDataResponse);
-        return;
-      }
-      break;
+      return true; // keep alive
+    },
 
-    case "FETCH_REPORT_SUITES":
-      let companyId = msg.companyId;
-      let suitesDataResponse = await fetchReportSuites(companyId);
-      if (suitesDataResponse.success) {
-        //remove sendResponse({ success: true, suitesData: suitesDataResponse.suitesData });
-        sendResponseMessage("FETCH_REPORT_SUITES_RESPONSE", { success: true, suitesData: suitesDataResponse.suitesData });
-        return;
-      } else {
-        //remove sendResponse(suitesDataResponse);
-        sendResponseMessage("FETCH_REPORT_SUITES_RESPONSE", suitesDataResponse);
-        return;
-      }
-      break;
+    // =========================
+    // DATA
+    // =========================
+    FETCH_COMPANIES: async () => {
+      let resp = await fetchCompaniesAndSuites();
+      return resp.success ? { success: true, companiesData: resp.data } : resp;
+    },
 
-    case "VALIDATE_PASSWORD":
+    FETCH_REPORT_SUITES: async () => {
+      let resp = await fetchReportSuites(msg.companyId);
+      return resp.success ? { success: true, suitesData: resp.suitesData } : resp;
+    },
+
+    VALIDATE_PASSWORD: async () => {
       let isPasswordValid = await validatePassword(msg.password);
-      //remove sendResponse({ isPasswordValid });
-      sendResponseMessage("VALIDATE_PASSWORD_RESPONSE", { isPasswordValid });
-      break;
+      return { isPasswordValid };
+    },
 
-    case "OPEN_EXTENSION_OPTION":
+    OPEN_EXTENSION_OPTION: () => {
       chrome.runtime.openOptionsPage();
-      chrome.runtime.sendMessage({ type: "RECHECK_TOKEN_STATUS" }, (res) => {
-        if (chrome.runtime.lastError) {
-          return;
-        }
-      });
-      break;
+      return { success: true };
+    },
 
-    case "GET_ENABLED_ON_PAGE_FLAG":
-      getEnableOnPageFlag().then((isEnabled) => {
-        //remove sendResponse({ isEnabled });
-        sendResponseMessage("GET_ENABLED_ON_PAGE_FLAG_RESPONSE", { isEnabled });
-      });
-      break;
+    // =========================
+    // 🔥 FIXED (your issue)
+    // =========================
+    GET_ENABLED_ON_PAGE_FLAG: async () => {
+      const isEnabled = await getEnableOnPageFlag();
+      return { isEnabled };
+    },
 
-    case "GET_PAGE_IDENTIFIERS":
-      chrome.storage.local.get(["pageIdentifierConfig"], (result) => {
-        let pageIdentifier = {};
-        let config = result.pageIdentifierConfig;
-        if (config) {
-          pageIdentifier.source = config.source;
-          pageIdentifier.windowPath = config.windowPathConfig.windowPath;
-          //remove sendResponse({ pageIdentifier: pageIdentifier, success: true });
-          sendResponseMessage("GET_PAGE_IDENTIFIERS_RESPONSE", { pageIdentifier: pageIdentifier, success: true });
-        } else {
-          //remove sendResponse({ success: false });
-          sendResponseMessage("GET_PAGE_IDENTIFIERS_RESPONSE", { success: false });
-        }
-      });
-      break;
+    GET_PAGE_IDENTIFIERS: async () => {
+      return new Promise((resolve) => {
+        chrome.storage.local.get(["pageIdentifierConfig"], (result) => {
+          let config = result.pageIdentifierConfig;
 
-    case "GET_REPORT":
-      getReport(msg.pageIdentifier, msg.reportType, msg.datePreset).then((reportData) => {
-        //remove sendResponse(reportData);
-        sendResponseMessage("GET_REPORT_RESPONSE", reportData);
+          if (config) {
+            resolve({
+              success: true,
+              pageIdentifier: {
+                source: config.source,
+                windowPath: config.windowPathConfig.windowPath,
+              },
+            });
+          } else {
+            resolve({ success: false });
+          }
+        });
       });
-      return true;
-      break;
-    case "GET_DATE_PRESET":
-      chrome.storage.local.get(["datePreset"], (result) => {
-        //remove sendResponse({ datePreset: result.datePreset || "7d" });
-        sendResponseMessage("GET_DATE_PRESET_RESPONSE", { datePreset: result.datePreset || "7d" });
+    },
+
+    GET_REPORT: async () => {
+      return await getReport(msg.pageIdentifier, msg.reportType, msg.datePreset);
+    },
+
+    GET_DATE_PRESET: async () => {
+      return new Promise((resolve) => {
+        chrome.storage.local.get(["datePreset"], (result) => {
+          resolve({ datePreset: result.datePreset || "7d" });
+        });
       });
-      break;
-    case "SET_DATE_PRESET":
-      chrome.storage.local.set({ datePreset: msg.datePreset }, () => {
-        //remove sendResponse({ success: true });
-        sendResponseMessage("SET_DATE_PRESET_RESPONSE", { success: true });
+    },
+
+    SET_DATE_PRESET: async () => {
+      return new Promise((resolve) => {
+        chrome.storage.local.set({ datePreset: msg.datePreset }, () => {
+          resolve({ success: true });
+        });
       });
-      break;
-    case "FETCH_DIMENSIONS":
-      fetchDimensions(msg.companyId, msg.rsid).then((resp) => {
-        //remove sendResponse(resp);
-        sendResponseMessage("FETCH_DIMENSIONS_RESPONSE", resp);
-      });
-      return true;
-      break;
-    case "FETCH_DIMENSION_VALUES":
-      fetchDimensionValues(msg.companyId, msg.rsid, msg.dimensionId, msg.limit, msg.segmentFilter).then((resp) => {
-        //remove sendResponse(resp);
-        sendResponseMessage("FETCH_DIMENSION_VALUES_RESPONSE", resp);
-      });
-      return true;
-      break;
-    case "GET_CUSTOM_REPORT":
-      getCustomReport(msg.pageIdentifier, msg.reportType, msg.datePreset, msg.customFilters).then((reportData) => {
-        //remove sendResponse(reportData);
-        sendResponseMessage("GET_CUSTOM_REPORT_RESPONSE", reportData);
-      });
-      return true;
-      break;
+    },
+
+    FETCH_DIMENSIONS: async () => {
+      return await fetchDimensions(msg.companyId, msg.rsid);
+    },
+
+    FETCH_DIMENSION_VALUES: async () => {
+      return await fetchDimensionValues(msg.companyId, msg.rsid, msg.dimensionId, msg.limit, msg.segmentFilter);
+    },
+
+    GET_CUSTOM_REPORT: async () => {
+      return await getCustomReport(msg.pageIdentifier, msg.reportType, msg.datePreset, msg.customFilters);
+    },
+  };
+
+  if (handlers[msg.type]) {
+    return handlers[msg.type](msg, sender);
   }
 
-  // Required for async sendResponse usage
-  return true;
+  return Promise.resolve({ success: false, error: "Unknown message type" });
 });
 
-function sendResponseMessage(type, payload) {
-  chrome.runtime.sendMessage({ type, ...payload });
+function sendResponseMessage(type, payload, args) {
+  chrome.runtime.sendMessage({ type, ...payload, args: args });
 }
 
 async function fetchCompaniesAndSuites() {

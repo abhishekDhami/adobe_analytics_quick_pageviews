@@ -65,36 +65,13 @@ authBtn.addEventListener("click", async () => {
       });
       return;
     }
-    chrome.runtime.sendMessage(
-      {
-        type: "AUTHENTICATE_USER",
-        client_id,
-        client_secret,
-        org_id,
-        userpassword,
-      },
-      async (response) => {
-        if (response.error) {
-          showMessage({
-            msg: "Error occured while Authenticating: " + response.error,
-            type: "error",
-          });
-          return;
-        } else if (response.success) {
-          authBtn.disabled = true;
-          showMessage({
-            msg: "Authenticated and Credentials fetched!",
-            type: "success",
-          });
-          populateCompaniesAndSuites(response.companiesData);
-          await chrome.storage.local.set({ credsStored: true });
-          step2.scrollIntoView({ behavior: "smooth", block: "start" });
-        }
-        if (chrome.runtime.lastError) {
-          return;
-        }
-      },
-    );
+    chrome.runtime.sendMessage({
+      type: "AUTHENTICATE_USER",
+      client_id,
+      client_secret,
+      org_id,
+      userpassword,
+    });
   } catch (error) {
     showMessage({
       msg: "An error occurred during authentication. Please try with valid credentials.",
@@ -342,7 +319,6 @@ function askUserToReauthenticate() {
   userpasswordElem.value = "";
   userpasswordElem.disabled = false;
   userpasswordElem.type = "text";
-  //remove accessToken, Refreshtoken, expires_at, encyptedVarifier, saltBase64, "credsStored"
   chrome.storage.local.remove(["accessToken", "refreshToken", "expires_at", "encryptedVerifier", "saltBase64", "credsStored"]);
   retrieveAccessTokenBtn.hidden = true;
 }
@@ -520,106 +496,7 @@ async function clearStep2andStep3Fields() {
 }
 
 async function populateStep2andStep3Fields(defaultSetting = false) {
-  chrome.runtime.sendMessage({ type: "GET_TOKEN_VALIDITY" }, async (response) => {
-    if (response.success == true) {
-      const { selectedCompanyID, selectedrsID, companiesList, rsidsList } = await chrome.storage.local.get(["selectedCompanyID", "selectedrsID", "companiesList", "rsidsList"]);
-      if (selectedCompanyID && selectedrsID) {
-        step2.style.display = "block";
-        step3.style.display = "block";
-        step4.style.display = "block";
-        if (companiesList) {
-          companySelect.innerHTML = "";
-          if (defaultSetting) {
-            let opt = document.createElement("option");
-            opt.value = "";
-            opt.textContent = "Select company";
-            opt.selected = true;
-            opt.disabled = true;
-            companySelect.appendChild(opt);
-          }
-          let companies = JSON.parse(companiesList);
-          companies.forEach((company) => {
-            let opt = document.createElement("option");
-            opt.value = company.globalCompanyId;
-            opt.textContent = `${company.companyName} (${company.globalCompanyId})`;
-            if (selectedCompanyID && selectedCompanyID === company.globalCompanyId && !defaultSetting) {
-              opt.selected = true;
-            }
-            companySelect.appendChild(opt);
-          });
-        }
-        if (rsidsList && !defaultSetting) {
-          let rsids = JSON.parse(rsidsList);
-          rsidSelect.disabled = false;
-          rsids.forEach((suite) => {
-            const opt = document.createElement("option");
-            opt.value = suite.rsid;
-            opt.textContent = `${suite.name} (${suite.rsid})`;
-            if (selectedrsID && selectedrsID === suite.rsid) {
-              opt.selected = true;
-            }
-            rsidSelect.appendChild(opt);
-          });
-        }
-        authBtn.disabled = true;
-        let userpasswordElem = document.getElementById("userpassword");
-        userpasswordElem.value = "ABCD"; //dummy value to indicate password is set
-        userpasswordElem.disabled = true;
-        userpasswordElem.type = "password";
-      } else {
-        let resp = await fetchCompaniesData();
-        if (resp.success) {
-          populateCompaniesAndSuites(resp.companiesData);
-          let userpasswordElem = document.getElementById("userpassword");
-          userpasswordElem.value = "ABCD"; //dummy value to indicate password is set
-          userpasswordElem.disabled = true;
-          userpasswordElem.type = "password";
-        }
-        // let userpasswordElem = document.getElementById("userpassword");
-        // userpasswordElem.value = "ABCD"; //dummy value to indicate password is set
-        // userpasswordElem.disabled = true;
-        // userpasswordElem.type = "password";
-      }
-      //Add step3 fields population code here
-      const { pageIdentifierConfig } = await chrome.storage.local.get(["pageIdentifierConfig"]);
-      if (pageIdentifierConfig) {
-        const cfg = pageIdentifierConfig;
-
-        document.getElementById("pageIdentifierSource").value = cfg.source;
-        togglePageIdentifierSource(cfg.source);
-        // URL
-        document.getElementById("piUrlType").value = cfg.urlConfig.urlType || "full";
-        document.getElementById("piRemoveQuery").checked = !!cfg.urlConfig.removeQuery;
-        document.getElementById("piRemoveHash").checked = !!cfg.urlConfig.removeHash;
-
-        // Title
-        document.getElementById("piTitleTrim").checked = !!cfg.titleConfig.trim;
-        document.getElementById("piTitleLowercase").checked = !!cfg.titleConfig.lowercase;
-
-        // Window
-        document.getElementById("piWindowPath").value = cfg.windowPathConfig.windowPath || "";
-
-        // Adobe
-        document.getElementById("piAdobeDimension").value = cfg.adobeDimensionConfig.dimension || "";
-        document.getElementById("piAdobeMatch").value = cfg.adobeDimensionConfig.match || "exact";
-      }
-      if (defaultSetting) {
-        document.getElementById("pageIdentifierSource").value = "url";
-        document.getElementById("piUrlType").value = "full";
-        document.getElementById("piAdobeMatch").value = "exact";
-        document.getElementById("piRemoveQuery").checked = true;
-        document.getElementById("piRemoveHash").checked = true;
-        document.getElementById("piTitleTrim").checked = true;
-      }
-      validateStep2AndStep3Fields();
-      populateCustomReportFields();
-    } else {
-      handleTokenErrorResponse(response);
-    }
-    if (chrome.runtime.lastError) {
-      return;
-    }
-  });
+  chrome.runtime.sendMessage({ type: "GET_TOKEN_VALIDITY_OPTIONS", args: { defaultSetting } });
 }
 
 async function handleTokenErrorResponse(response) {
@@ -1217,15 +1094,170 @@ async function populateCustomReportFields() {
   }
 }
 
-chrome.runtime.onMessage.addListener(async (msg, sender, sendResponse) => {
-  if (msg.type == "RECHECK_TOKEN_STATUS") {
-    let { credsStored } = await chrome.storage.local.get(["credsStored"]);
-    if (credsStored) {
-      populateStep2andStep3Fields();
-    }
-    sendResponse();
-  } else if (msg.type === "AUTHENTICATE_USER_RESPONSE") {
-    console.log("Auth success received:", msg);
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  // 👉 Ignore unrelated messages (VERY IMPORTANT)
+  if (message.type !== "RECHECK_TOKEN_STATUS" && message.type !== "GET_TOKEN_VALIDITY_OPTIONS_RESPONSE" && message.type !== "AUTHENTICATE_USER_RESPONSE") {
+    return;
   }
-  return true;
+
+  (async () => {
+    try {
+      switch (message.type) {
+        case "RECHECK_TOKEN_STATUS": {
+          const { credsStored } = await chrome.storage.local.get(["credsStored"]);
+          if (credsStored) {
+            populateStep2andStep3Fields();
+          }
+          break;
+        }
+
+        case "GET_TOKEN_VALIDITY_OPTIONS_RESPONSE": {
+          if (message.success === true) {
+            const { selectedCompanyID, selectedrsID, companiesList, rsidsList } = await chrome.storage.local.get(["selectedCompanyID", "selectedrsID", "companiesList", "rsidsList"]);
+
+            let defaultSetting = message.args?.defaultSetting;
+
+            if (selectedCompanyID && selectedrsID) {
+              step2.style.display = "block";
+              step3.style.display = "block";
+              step4.style.display = "block";
+
+              if (companiesList) {
+                companySelect.innerHTML = "";
+
+                if (defaultSetting) {
+                  let opt = document.createElement("option");
+                  opt.value = "";
+                  opt.textContent = "Select company";
+                  opt.selected = true;
+                  opt.disabled = true;
+                  companySelect.appendChild(opt);
+                }
+
+                let companies = JSON.parse(companiesList);
+                companies.forEach((company) => {
+                  let opt = document.createElement("option");
+                  opt.value = company.globalCompanyId;
+                  opt.textContent = `${company.companyName} (${company.globalCompanyId})`;
+
+                  if (selectedCompanyID && selectedCompanyID === company.globalCompanyId && !defaultSetting) {
+                    opt.selected = true;
+                  }
+
+                  companySelect.appendChild(opt);
+                });
+              }
+
+              if (rsidsList && !defaultSetting) {
+                let rsids = JSON.parse(rsidsList);
+                rsidSelect.disabled = false;
+
+                rsids.forEach((suite) => {
+                  const opt = document.createElement("option");
+                  opt.value = suite.rsid;
+                  opt.textContent = `${suite.name} (${suite.rsid})`;
+
+                  if (selectedrsID && selectedrsID === suite.rsid) {
+                    opt.selected = true;
+                  }
+
+                  rsidSelect.appendChild(opt);
+                });
+              }
+
+              authBtn.disabled = true;
+
+              let userpasswordElem = document.getElementById("userpassword");
+              userpasswordElem.value = "ABCD";
+              userpasswordElem.disabled = true;
+              userpasswordElem.type = "password";
+            } else {
+              let resp = await fetchCompaniesData();
+
+              if (resp.success) {
+                populateCompaniesAndSuites(resp.companiesData);
+
+                let userpasswordElem = document.getElementById("userpassword");
+                userpasswordElem.value = "ABCD";
+                userpasswordElem.disabled = true;
+                userpasswordElem.type = "password";
+              }
+            }
+
+            const { pageIdentifierConfig } = await chrome.storage.local.get(["pageIdentifierConfig"]);
+
+            if (pageIdentifierConfig) {
+              const cfg = pageIdentifierConfig;
+
+              document.getElementById("pageIdentifierSource").value = cfg.source;
+              togglePageIdentifierSource(cfg.source);
+
+              document.getElementById("piUrlType").value = cfg.urlConfig.urlType || "full";
+              document.getElementById("piRemoveQuery").checked = !!cfg.urlConfig.removeQuery;
+              document.getElementById("piRemoveHash").checked = !!cfg.urlConfig.removeHash;
+
+              document.getElementById("piTitleTrim").checked = !!cfg.titleConfig.trim;
+              document.getElementById("piTitleLowercase").checked = !!cfg.titleConfig.lowercase;
+
+              document.getElementById("piWindowPath").value = cfg.windowPathConfig.windowPath || "";
+
+              document.getElementById("piAdobeDimension").value = cfg.adobeDimensionConfig.dimension || "";
+              document.getElementById("piAdobeMatch").value = cfg.adobeDimensionConfig.match || "exact";
+            }
+
+            if (defaultSetting) {
+              document.getElementById("pageIdentifierSource").value = "url";
+              document.getElementById("piUrlType").value = "full";
+              document.getElementById("piAdobeMatch").value = "exact";
+              document.getElementById("piRemoveQuery").checked = true;
+              document.getElementById("piRemoveHash").checked = true;
+              document.getElementById("piTitleTrim").checked = true;
+            }
+
+            validateStep2AndStep3Fields();
+            populateCustomReportFields();
+          } else {
+            handleTokenErrorResponse(message);
+          }
+
+          break;
+        }
+
+        case "AUTHENTICATE_USER_RESPONSE": {
+          if (message.error) {
+            showMessage({
+              msg: "Error occured while Authenticating: " + message.error,
+              type: "error",
+            });
+            return;
+          }
+
+          if (message.success) {
+            authBtn.disabled = true;
+
+            showMessage({
+              msg: "Authenticated and Credentials fetched!",
+              type: "success",
+            });
+
+            populateCompaniesAndSuites(message.companiesData);
+
+            await chrome.storage.local.set({ credsStored: true });
+
+            step2.scrollIntoView({ behavior: "smooth", block: "start" });
+          }
+
+          break;
+        }
+      }
+    } catch (err) {
+      console.error("Options listener error:", err);
+    }
+  })();
+
+  // ❗ DO NOT return true
 });
+
+function sendResponseMessage(type, payload) {
+  chrome.runtime.sendMessage({ type, ...payload });
+}

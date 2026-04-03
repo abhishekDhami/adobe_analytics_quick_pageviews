@@ -1514,7 +1514,7 @@ async function loadWidgetOnThePage() {
 
   async function checkTokenValidity() {
     return new Promise((resolve) => {
-      chrome.runtime.sendMessage({ type: "GET_TOKEN_VALIDITY" }, (response) => {
+      chrome.runtime.sendMessage({ type: "GET_TOKEN_VALIDITY_CONTENT" }, (response) => {
         if (response && response.success) {
           resolve(true);
         } else {
@@ -1540,7 +1540,7 @@ async function loadWidgetOnThePage() {
     }
   }
 
-  async function fetchPageIdentifiers() {
+  function fetchPageIdentifiers() {
     return new Promise((resolve, reject) => {
       chrome.runtime.sendMessage({ type: "GET_PAGE_IDENTIFIERS" }, (response) => {
         if (response.pageIdentifier && response.success) {
@@ -2168,16 +2168,17 @@ function getCustomReportData(reportType = "pageViews", datePreset = "7d", custom
   });
 }
 
-async function getEnableOnPageFlag() {
+function getEnableOnPageFlag() {
   return new Promise((resolve) => {
     chrome.runtime.sendMessage({ type: "GET_ENABLED_ON_PAGE_FLAG" }, (response) => {
+      debugger;
       if (response && typeof response.isEnabled === "boolean") {
         resolve(response.isEnabled);
       } else {
         resolve(false);
       }
       if (chrome.runtime.lastError) {
-        return;
+        resolve(false);
       }
     });
   });
