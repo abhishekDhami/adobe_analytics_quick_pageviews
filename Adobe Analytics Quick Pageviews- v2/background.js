@@ -8,6 +8,10 @@ const SESSION_TIMEOUT_MS = 4 * 60 * 60 * 1000; // 4 hours
 const WRAPPED_KEY_STORAGE = "wrappedSessionKey";
 const DERIVED_KEY_SESSION = "derivedKeyCache";
 
+if (globalThis.debugExtension === undefined) {
+  globalThis.debugExtension = false;
+}
+
 // =====================
 // Date Preset Helpers
 // =====================
@@ -87,7 +91,6 @@ function getDateRangeForPreset(presetKey, reportSuiteTimezone) {
     limit = preset.months;
   }
 
-  
   const dateRangeString = `${formatLocalDate(startDate)}T00:00:00.000/${formatLocalDate(endDate)}T00:00:00.000`;
 
   return {
@@ -136,68 +139,6 @@ function safeAdobeTruncate(inpString, byteLimit = 100) {
   }
 }
 
-//all the actions from the content scripts
-chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
-  if (msg.action === "GET_TOKEN_VALIDITY") {
-    getValidAccessToken().then((resp) => {
-      sendResponse(resp);
-    });
-    return true;
-  } else if (msg.action === "OPEN_EXTENSION_OPTION") {
-    chrome.runtime.openOptionsPage();
-    chrome.runtime.sendMessage({ type: "RECHECK_TOKEN_STATUS" }, (res) => {
-      if (chrome.runtime.lastError) {
-        return;
-      }
-    });
-  } else if (msg.action === "GET_ENABLED_ON_PAGE_FLAG") {
-    getEnableOnPageFlag().then((isEnabled) => {
-      sendResponse({ isEnabled });
-    });
-  } else if (msg.action === "GET_PAGE_IDENTIFIERS") {
-    chrome.storage.local.get(["pageIdentifierConfig"], (result) => {
-      let pageIdentifier = {};
-      let config = result.pageIdentifierConfig;
-      if (config) {
-        pageIdentifier.source = config.source;
-        pageIdentifier.windowPath = config.windowPathConfig.windowPath;
-        sendResponse({ pageIdentifier: pageIdentifier, success: true });
-      } else {
-        sendResponse({ success: false });
-      }
-    });
-  } else if (msg.action === "GET_REPORT") {
-    getReport(msg.pageIdentifier, msg.reportType, msg.datePreset).then((reportData) => {
-      sendResponse(reportData);
-    });
-    return true;
-  } else if (msg.action === "GET_DATE_PRESET") {
-    chrome.storage.local.get(["datePreset"], (result) => {
-      sendResponse({ datePreset: result.datePreset || "7d" });
-    });
-  } else if (msg.action === "SET_DATE_PRESET") {
-    chrome.storage.local.set({ datePreset: msg.datePreset }, () => {
-      sendResponse({ success: true });
-    });
-  } else if (msg.action === "FETCH_DIMENSIONS") {
-    fetchDimensions(msg.companyId, msg.rsid).then((resp) => {
-      sendResponse(resp);
-    });
-    return true;
-  } else if (msg.action === "FETCH_DIMENSION_VALUES") {
-    fetchDimensionValues(msg.companyId, msg.rsid, msg.dimensionId, msg.limit, msg.segmentFilter).then((resp) => {
-      sendResponse(resp);
-    });
-    return true;
-  } else if (msg.action === "GET_CUSTOM_REPORT") {
-    getCustomReport(msg.pageIdentifier, msg.reportType, msg.datePreset, msg.customFilters).then((reportData) => {
-      sendResponse(reportData);
-    });
-    return true;
-  }
-  return true;
-});
-
 async function getEnableOnPageFlag() {
   const { enableOnPage } = await chrome.storage.local.get("enableOnPage");
   if (enableOnPage === undefined) return false;
@@ -207,9 +148,17 @@ async function getEnableOnPageFlag() {
 function getReport(pageIdentifier, reportType = "pageViews", datePreset = "7d") {
   return new Promise(async (resolve, reject) => {
     try {
-      const { selectedCompanyID, selectedrsID, pageIdentifierConfig, reportSuiteTimezone } = await chrome.storage.local.get(["selectedCompanyID", "selectedrsID", "pageIdentifierConfig", "reportSuiteTimezone"]);
+      const { selectedCompanyID, selectedrsID, pageIdentifierConfig, reportSuiteTimezone } = await chrome.storage.local.get([
+        "selectedCompanyID",
+        "selectedrsID",
+        "pageIdentifierConfig",
+        "reportSuiteTimezone",
+      ]);
       const clientCreds = await decryptClientCredentials();
-      if (!clientCreds) { resolve({ reportData: null, success: false }); return; }
+      if (!clientCreds) {
+        resolve({ reportData: null, success: false });
+        return;
+      }
       const client_id = clientCreds.client_id;
 
       if (pageIdentifier == undefined) resolve(null);
@@ -280,7 +229,14 @@ function getReport(pageIdentifier, reportType = "pageViews", datePreset = "7d") 
       }
 
       //Reading data from Cache first — include datePreset in cache key
-      let cacheReadResponse = await readCache(selectedrsID, pageIdentifier.value, pageIdentifierConfig.adobeDimensionConfig.dimension, pageIdentifierConfig.adobeDimensionConfig.match, reportType, datePreset);
+      let cacheReadResponse = await readCache(
+        selectedrsID,
+        pageIdentifier.value,
+        pageIdentifierConfig.adobeDimensionConfig.dimension,
+        pageIdentifierConfig.adobeDimensionConfig.match,
+        reportType,
+        datePreset,
+      );
       if (cacheReadResponse.data != null && cacheReadResponse.hit === true) {
         resolve({ reportData: cacheReadResponse.data, success: true, fromCache: true });
         return;
@@ -430,7 +386,10 @@ function getCustomReport(pageIdentifier, reportType = "pageViews", datePreset = 
     try {
       const { selectedCompanyID, selectedrsID, reportSuiteTimezone } = await chrome.storage.local.get(["selectedCompanyID", "selectedrsID", "reportSuiteTimezone"]);
       const clientCreds = await decryptClientCredentials();
-      if (!clientCreds) { resolve({ reportData: null, success: false }); return; }
+      if (!clientCreds) {
+        resolve({ reportData: null, success: false });
+        return;
+      }
       const client_id = clientCreds.client_id;
 
       if (!customFilters.primaryDimension || !customFilters.primaryValue) {
@@ -460,7 +419,9 @@ function getCustomReport(pageIdentifier, reportType = "pageViews", datePreset = 
       }
 
       // Build metrics and dimension
-      let metricsArray = [], rowDimension = "", customSettings = {};
+      let metricsArray = [],
+        rowDimension = "",
+        customSettings = {};
       if (reportType === "countryData") {
         metricsArray = [{ id: "metrics/pageviews", columnId: "0", sort: "desc" }];
         rowDimension = "variables/geocountry";
@@ -679,49 +640,68 @@ function resetSessionTimer() {
 }
 
 // Listen for messages from options or popup
-chrome.runtime.onMessage.addListener(async (msg, sender, sendResponse) => {
-  switch (msg.type) {
-    case "GET_TOKEN_VALIDITY":
-      const resp = await getValidAccessToken();
-      sendResponse(resp);
-      break;
-    case "GET_KEY_STATUS":
-      let hasKey = sessionKey !== null ? true : false;
-      sendResponse({ hasKey: hasKey });
-      break;
+chrome.runtime.onMessage.addListener((msg, sender) => {
+  let args = msg.args || {};
 
-    case "GET_DECRYPTED_CLIENT_CREDS":
-      // Attempt migration first (handles existing users with plaintext creds)
+  const handlers = {
+    // =========================
+    // TOKEN
+    // =========================
+    GET_TOKEN_VALIDITY_OPTIONS: async () => {
+      let resp = await getValidAccessToken();
+      sendResponseMessage("GET_TOKEN_VALIDITY_OPTIONS_RESPONSE", resp, args);
+      return true;
+    },
+
+    GET_TOKEN_VALIDITY_CONTENT: async () => {
+      let response = await getValidAccessToken();
+      return response;
+    },
+
+    GET_KEY_STATUS: () => {
+      let hasKey = sessionKey !== null;
+      return { hasKey };
+    },
+
+    GET_DECRYPTED_CLIENT_CREDS: async () => {
       await migrateClientCredentials();
       const creds = await decryptClientCredentials();
-      if (creds) {
-        sendResponse({ success: true, client_id: creds.client_id, client_secret: creds.client_secret });
-      } else {
-        sendResponse({ success: false });
-      }
-      break;
 
-    case "AUTHENTICATE_USER":
-      let client_id = msg.client_id;
-      let client_secret = msg.client_secret;
-      let org_id = msg.org_id;
-      let userpassword = msg.userpassword;
+      if (creds) {
+        return {
+          success: true,
+          client_id: creds.client_id,
+          client_secret: creds.client_secret,
+        };
+      }
+      return { success: false };
+    },
+
+    // =========================
+    // AUTH (IMPORTANT: keep event-based)
+    // =========================
+    AUTHENTICATE_USER: async () => {
+      let { client_id, client_secret, org_id, userpassword } = msg;
+
       const redirectUri = chrome.identity.getRedirectURL();
       const scope = "additional_info.projectedProductContext, openid, read_organizations, additional_info.job_function, AdobeID";
+
       const params = new URLSearchParams({
         client_id,
         response_type: "code",
         redirect_uri: redirectUri,
         scope,
       });
+
       let authUrlwithParam = `${authUrl}?${params.toString()}`;
 
       chrome.identity.launchWebAuthFlow({ url: authUrlwithParam, interactive: true }, async (redirectResponse) => {
         try {
           if (chrome.runtime.lastError || !redirectResponse) {
-            sendResponse({ error: "Authentication failed. Please try again with valid credentials" });
+            sendResponseMessage("AUTHENTICATE_USER_RESPONSE", { error: "Authentication failed. Please try again." }, args);
             return;
           }
+
           const code = new URL(redirectResponse).searchParams.get("code");
 
           const body = new URLSearchParams({
@@ -740,62 +720,123 @@ chrome.runtime.onMessage.addListener(async (msg, sender, sendResponse) => {
           const tokenData = await tokenResp.json();
 
           if (!tokenData.access_token) {
-            let msg = "Token fetch failed. Please try again with valid credentials.";
-            if (tokenData.error) msg += ` Error: ${tokenData.error}`;
-            sendResponse({ error: msg });
+            let msgErr = "Token fetch failed.";
+            if (tokenData.error) msgErr += ` Error: ${tokenData.error}`;
+
+            sendResponseMessage("AUTHENTICATE_USER_RESPONSE", { error: msgErr }, args);
             return;
           }
 
           let expires_at = Date.now() + (tokenData.expires_in || 3600) * 1000;
 
           await encryptAndStoreCredentials(userpassword, tokenData.access_token, tokenData.refresh_token, client_id, client_secret, org_id, expires_at);
+
           let companyDataResponse = await fetchCompaniesAndSuites();
-          if (companyDataResponse.success) {
-            sendResponse({ success: true, companiesData: companyDataResponse.data });
-            return;
-          } else {
-            sendResponse(companyDataResponse);
-            return;
-          }
+
+          sendResponseMessage("AUTHENTICATE_USER_RESPONSE", companyDataResponse.success ? { success: true, companiesData: companyDataResponse.data } : companyDataResponse, args);
         } catch (error) {
-          sendResponse({ error: "An error occurred during authentication. Please try with valid credentials." });
-          console.log(error);
+          console.error(error);
+          sendResponseMessage("AUTHENTICATE_USER_RESPONSE", { error: "Authentication failed." }, args);
         }
       });
-      break;
 
-    case "FETCH_COMPANIES":
-      let companyDataResponse = await fetchCompaniesAndSuites();
-      if (companyDataResponse.success) {
-        sendResponse({ success: true, companiesData: companyDataResponse.data });
-        return;
-      } else {
-        sendResponse(companyDataResponse);
-        return;
-      }
-      break;
+      return true; // keep alive
+    },
 
-    case "FETCH_REPORT_SUITES":
-      let companyId = msg.companyId;
-      let suitesDataResponse = await fetchReportSuites(companyId);
-      if (suitesDataResponse.success) {
-        sendResponse({ success: true, suitesData: suitesDataResponse.suitesData });
-        return;
-      } else {
-        sendResponse(suitesDataResponse);
-        return;
-      }
-      break;
+    // =========================
+    // DATA
+    // =========================
+    FETCH_COMPANIES: async () => {
+      let resp = await fetchCompaniesAndSuites();
+      return resp.success ? { success: true, companiesData: resp.data } : resp;
+    },
 
-    case "VALIDATE_PASSWORD":
+    FETCH_REPORT_SUITES: async () => {
+      let resp = await fetchReportSuites(msg.companyId);
+      return resp.success ? { success: true, suitesData: resp.suitesData } : resp;
+    },
+
+    VALIDATE_PASSWORD: async () => {
       let isPasswordValid = await validatePassword(msg.password);
-      sendResponse({ isPasswordValid });
-      break;
+      return { isPasswordValid };
+    },
+
+    OPEN_EXTENSION_OPTION: () => {
+      chrome.runtime.openOptionsPage();
+      return { success: true };
+    },
+
+    // =========================
+    // 🔥 FIXED (your issue)
+    // =========================
+    GET_ENABLED_ON_PAGE_FLAG: async () => {
+      const isEnabled = await getEnableOnPageFlag();
+      return { isEnabled };
+    },
+
+    GET_PAGE_IDENTIFIERS: async () => {
+      return new Promise((resolve) => {
+        chrome.storage.local.get(["pageIdentifierConfig"], (result) => {
+          let config = result.pageIdentifierConfig;
+
+          if (config) {
+            resolve({
+              success: true,
+              pageIdentifier: {
+                source: config.source,
+                windowPath: config.windowPathConfig.windowPath,
+              },
+            });
+          } else {
+            resolve({ success: false });
+          }
+        });
+      });
+    },
+
+    GET_REPORT: async () => {
+      return await getReport(msg.pageIdentifier, msg.reportType, msg.datePreset);
+    },
+
+    GET_DATE_PRESET: async () => {
+      return new Promise((resolve) => {
+        chrome.storage.local.get(["datePreset"], (result) => {
+          resolve({ datePreset: result.datePreset || "7d" });
+        });
+      });
+    },
+
+    SET_DATE_PRESET: async () => {
+      return new Promise((resolve) => {
+        chrome.storage.local.set({ datePreset: msg.datePreset }, () => {
+          resolve({ success: true });
+        });
+      });
+    },
+
+    FETCH_DIMENSIONS: async () => {
+      return await fetchDimensions(msg.companyId, msg.rsid);
+    },
+
+    FETCH_DIMENSION_VALUES: async () => {
+      return await fetchDimensionValues(msg.companyId, msg.rsid, msg.dimensionId, msg.limit, msg.segmentFilter);
+    },
+
+    GET_CUSTOM_REPORT: async () => {
+      return await getCustomReport(msg.pageIdentifier, msg.reportType, msg.datePreset, msg.customFilters);
+    },
+  };
+
+  if (handlers[msg.type]) {
+    return handlers[msg.type](msg, sender);
   }
 
-  // Required for async sendResponse usage
-  return true;
+  return Promise.resolve({ success: false, error: "Unknown message type" });
 });
+
+function sendResponseMessage(type, payload, args) {
+  chrome.runtime.sendMessage({ type, ...payload, args: args });
+}
 
 async function fetchCompaniesAndSuites() {
   let tokenResponse = await getValidAccessToken();
@@ -951,17 +992,14 @@ async function fetchDimensions(companyId, rsid) {
     if (!clientCreds) return { error: "Unable to decrypt credentials. Please re-enter password." };
     const { client_id } = clientCreds;
 
-    const resp = await fetch(
-      `${reportingAPIURL}/${companyId}/dimensions?rsid=${encodeURIComponent(rsid)}&locale=en_US&expansion=tags,extraTitleInfo`,
-      {
-        headers: {
-          Authorization: `Bearer ${accessToken}`,
-          "x-api-key": client_id,
-          "x-proxy-global-company-id": companyId,
-          Accept: "application/json",
-        },
+    const resp = await fetch(`${reportingAPIURL}/${companyId}/dimensions?rsid=${encodeURIComponent(rsid)}&locale=en_US&expansion=tags,extraTitleInfo`, {
+      headers: {
+        Authorization: `Bearer ${accessToken}`,
+        "x-api-key": client_id,
+        "x-proxy-global-company-id": companyId,
+        Accept: "application/json",
       },
-    );
+    });
 
     const data = await resp.json();
 
@@ -1020,7 +1058,7 @@ async function fetchDimensionValues(companyId, rsid, dimensionId, limit = 50, se
     endDate.setDate(today.getDate() + 1);
     const startDate = new Date(today);
     startDate.setDate(today.getDate() - 29);
-    
+
     const dateRangeString = `${formatLocalDate(startDate)}T00:00:00.000/${formatLocalDate(endDate)}T00:00:00.000`;
 
     // Build global filters
@@ -1328,4 +1366,26 @@ async function getCachedDerivedKey() {
   const raw = Uint8Array.from(atob(res[DERIVED_KEY_SESSION]), (c) => c.charCodeAt(0));
 
   return crypto.subtle.importKey("raw", raw, { name: "AES-GCM" }, false, ["encrypt", "decrypt", "wrapKey", "unwrapKey"]);
+}
+
+function sendMessageAsync(message) {
+  return new Promise((resolve) => {
+    try {
+      chrome.runtime.sendMessage(message, (response) => {
+        if (chrome.runtime.lastError) {
+          if (globalThis.debugExtension) {
+            console.error("[Extension Error]", message.type, chrome.runtime.lastError);
+          }
+          resolve(null); // fallback
+          return;
+        }
+        resolve(response);
+      });
+    } catch (err) {
+      if (globalThis.debugExtension) {
+        console.error("[Extension Exception]", message.type, err);
+      }
+      resolve(null);
+    }
+  });
 }

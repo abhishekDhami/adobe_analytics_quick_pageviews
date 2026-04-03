@@ -8,6 +8,10 @@ let currentDatePreset = "7d"; // default preset
 let spaDebounceTimer = null;
 const SPA_DEBOUNCE_MS = 1500; // debounce SPA navigation re-fetches
 
+if (globalThis.debugExtension === undefined) {
+  globalThis.debugExtension = false;
+}
+
 function inInitCharts() {
   Chart.defaults.color = "#ddd";
   Chart.defaults.borderColor = "#333";
@@ -77,31 +81,16 @@ function delay(seconds) {
 // =====================
 // Date Preset Helpers
 // =====================
-function getSavedDatePreset() {
-  return new Promise((resolve) => {
-    chrome.runtime.sendMessage({ action: "GET_DATE_PRESET" }, (response) => {
-      if (chrome.runtime.lastError) {
-        resolve("7d");
-        return;
-      }
-      resolve(response?.datePreset || "7d");
-    });
-  });
+async function getSavedDatePreset() {
+  const response = await sendMessageAsync({ type: "GET_DATE_PRESET" });
+
+  if (!response) return "7d";
+
+  return response.datePreset || "7d";
 }
 
-function saveDatePreset(preset) {
-  return new Promise((resolve) => {
-    chrome.runtime.sendMessage(
-      { action: "SET_DATE_PRESET", datePreset: preset },
-      (response) => {
-        if (chrome.runtime.lastError) {
-          resolve();
-          return;
-        }
-        resolve();
-      },
-    );
-  });
+async function saveDatePreset(preset) {
+  await sendMessageAsync({ type: "SET_DATE_PRESET", datePreset: preset });
 }
 
 const DATE_PRESET_LABELS = {
@@ -118,15 +107,11 @@ function formatLargeNumber(num) {
   if (num < 0) return "-" + formatLargeNumber(Math.abs(num));
   if (num >= 1_000_000_000) {
     const val = num / 1_000_000_000;
-    return val % 1 === 0
-      ? val.toFixed(0) + "B"
-      : val.toFixed(2).replace(/\.?0+$/, "") + "B";
+    return val % 1 === 0 ? val.toFixed(0) + "B" : val.toFixed(2).replace(/\.?0+$/, "") + "B";
   }
   if (num >= 1_000_000) {
     const val = num / 1_000_000;
-    return val % 1 === 0
-      ? val.toFixed(0) + "M"
-      : val.toFixed(2).replace(/\.?0+$/, "") + "M";
+    return val % 1 === 0 ? val.toFixed(0) + "M" : val.toFixed(2).replace(/\.?0+$/, "") + "M";
   }
   return num.toLocaleString();
 }
@@ -1027,9 +1012,7 @@ async function loadWidgetOnThePage() {
   const tabPagePerf = shadow.getElementById("tabPagePerf");
   const tabCustomReport = shadow.getElementById("tabCustomReport");
   const tabContentPagePerf = shadow.getElementById("tabContentPagePerf");
-  const tabContentCustomReport = shadow.getElementById(
-    "tabContentCustomReport",
-  );
+  const tabContentCustomReport = shadow.getElementById("tabContentCustomReport");
   const crSecondarySelect = shadow.getElementById("crSecondarySelect");
 
   // Custom report chart instances (separate from page perf)
@@ -1094,10 +1077,7 @@ async function loadWidgetOnThePage() {
           await loadCustomReportTab();
           // Restore active tab
           const savedTab = sessionStorage.getItem("adobePVExtensionActiveTab");
-          if (
-            savedTab === "customReport" &&
-            !tabCustomReport.classList.contains("disabled")
-          ) {
+          if (savedTab === "customReport" && !tabCustomReport.classList.contains("disabled")) {
             switchTab("customReport");
             await fetchAndRenderCustomReport();
           }
@@ -1141,16 +1121,13 @@ async function loadWidgetOnThePage() {
   /* ---------- Settings button → open options page ---------- */
   settingsBtn.addEventListener("click", (e) => {
     e.stopPropagation(); // Prevent drag
-    chrome.runtime.sendMessage({ action: "OPEN_EXTENSION_OPTION" });
+    chrome.runtime.sendMessage({ type: "OPEN_EXTENSION_OPTION" });
   });
 
   /* ---------- Feedback link → Chrome Web Store ---------- */
   feedbackLink.addEventListener("click", (e) => {
     e.preventDefault();
-    window.open(
-      "https://chromewebstore.google.com/detail/oommkcdglakgcanecjjfbmoipcfiljbe",
-      "_blank",
-    );
+    window.open("https://chromewebstore.google.com/detail/oommkcdglakgcanecjjfbmoipcfiljbe", "_blank");
   });
 
   /* ---------- MORE → expanded ---------- */
@@ -1275,11 +1252,7 @@ async function loadWidgetOnThePage() {
         statusEl.textContent = "No data to export.";
         return;
       }
-      csvContent = await buildCsvContent(
-        lastCrData,
-        lastCrCountryData,
-        "Custom Report",
-      );
+      csvContent = await buildCsvContent(lastCrData, lastCrCountryData, "Custom Report");
       filename = `custom_report_${currentDatePreset}_${new Date().toISOString().split("T")[0]}.csv`;
     } else {
       // Export page performance data
@@ -1287,11 +1260,7 @@ async function loadWidgetOnThePage() {
         statusEl.textContent = "No data to export.";
         return;
       }
-      csvContent = await buildCsvContent(
-        lastPagePerfData,
-        lastPagePerfCountryData,
-        "Page Performance",
-      );
+      csvContent = await buildCsvContent(lastPagePerfData, lastPagePerfCountryData, "Page Performance");
       filename = `page_performance_${currentDatePreset}_${new Date().toISOString().split("T")[0]}.csv`;
     }
 
@@ -1329,11 +1298,8 @@ async function loadWidgetOnThePage() {
 
     // Filter conditions
     if (reportName === "Page Performance") {
-      const { pageIdentifierCondition } = await chrome.storage.local.get(
-        "pageIdentifierCondition",
-      );
-      if (pageIdentifierCondition)
-        csv += `Filter: ${pageIdentifierCondition}\n`;
+      const { pageIdentifierCondition } = await chrome.storage.local.get("pageIdentifierCondition");
+      if (pageIdentifierCondition) csv += `Filter: ${pageIdentifierCondition}\n`;
     } else if (reportName === "Custom Report" && customReportConfig) {
       let condition = `${customReportConfig.primaryDimension?.displayLabel || ""} ${customReportConfig.primaryMatch || ""} '${customReportConfig.primaryValue || ""}'`;
       const secVal = crSecondarySelect?.value;
@@ -1363,11 +1329,7 @@ async function loadWidgetOnThePage() {
     }
 
     // Country data with raw counts
-    if (
-      countryData &&
-      countryData.countries &&
-      countryData.countries.length > 0
-    ) {
+    if (countryData && countryData.countries && countryData.countries.length > 0) {
       csv += `\nCountry (Top 5 Countries),Pageviews,Traffic Share (%)\n`;
       const rawCounts = countryData.rawCounts || [];
       for (let i = 0; i < countryData.countries.length; i++) {
@@ -1460,9 +1422,7 @@ async function loadWidgetOnThePage() {
     ev.preventDefault();
     startDrag(ev.clientX, ev.clientY);
   });
-  document.addEventListener("mousemove", (ev) =>
-    doDrag(ev.clientX, ev.clientY),
-  );
+  document.addEventListener("mousemove", (ev) => doDrag(ev.clientX, ev.clientY));
   document.addEventListener("mouseup", stopDrag);
 
   // touch events
@@ -1488,14 +1448,14 @@ async function loadWidgetOnThePage() {
 
   // ---------- reauthBtn Click handler ----------
   reauthBtn.addEventListener("click", () => {
-    chrome.runtime.sendMessage(
-      { action: "OPEN_EXTENSION_OPTION" },
-      (response) => {
-        if (chrome.runtime.lastError) {
-          return;
+    chrome.runtime.sendMessage({ type: "OPEN_EXTENSION_OPTION" }, (response) => {
+      if (chrome.runtime.lastError) {
+        if (globalThis.debugExtension) {
+          console.error(chrome.runtime.lastError);
         }
-      },
-    );
+        return;
+      }
+    });
   });
 
   // ---------- Auto-refresh on tab focus (after re-authentication) ----------
@@ -1549,19 +1509,19 @@ async function loadWidgetOnThePage() {
 
   async function checkTokenValidity() {
     return new Promise((resolve) => {
-      chrome.runtime.sendMessage(
-        { action: "GET_TOKEN_VALIDITY" },
-        (response) => {
-          if (response && response.success) {
-            resolve(true);
-          } else {
-            resolve(false);
+      chrome.runtime.sendMessage({ type: "GET_TOKEN_VALIDITY_CONTENT" }, (response) => {
+        if (chrome.runtime.lastError) {
+          if (globalThis.debugExtension) {
+            console.error(chrome.runtime.lastError);
           }
-          if (chrome.runtime.lastError) {
-            return;
-          }
-        },
-      );
+          return;
+        }
+        if (response && response.success) {
+          resolve(true);
+        } else {
+          resolve(false);
+        }
+      });
     });
   }
 
@@ -1578,33 +1538,30 @@ async function loadWidgetOnThePage() {
     }
   }
 
-  async function fetchPageIdentifiers() {
+  function fetchPageIdentifiers() {
     return new Promise((resolve, reject) => {
-      chrome.runtime.sendMessage(
-        { action: "GET_PAGE_IDENTIFIERS" },
-        (response) => {
-          if (response.pageIdentifier && response.success) {
-            pageIdentifier = response.pageIdentifier;
-            if (pageIdentifier.source == "url") {
-              pageIdentifier.value = window.location.href;
-              resolve({ success: true, pageIdentifier: pageIdentifier });
-            } else if (pageIdentifier.source == "title") {
-              pageIdentifier.value = document.title;
-              resolve({ success: true, pageIdentifier: pageIdentifier });
-            } else if (pageIdentifier.source == "window") {
-              window.dispatchEvent(
-                new CustomEvent("fetchPageWindowPathIdentifiers", {
-                  detail: pageIdentifier,
-                }),
-              );
-              resolve({});
-            }
-          } else {
-            resolve({ success: false, pageIdentifier: {} });
+      chrome.runtime.sendMessage({ type: "GET_PAGE_IDENTIFIERS" }, (response) => {
+        if (response.pageIdentifier && response.success) {
+          pageIdentifier = response.pageIdentifier;
+          if (pageIdentifier.source == "url") {
+            pageIdentifier.value = window.location.href;
+            resolve({ success: true, pageIdentifier: pageIdentifier });
+          } else if (pageIdentifier.source == "title") {
+            pageIdentifier.value = document.title;
+            resolve({ success: true, pageIdentifier: pageIdentifier });
+          } else if (pageIdentifier.source == "window") {
+            window.dispatchEvent(
+              new CustomEvent("fetchPageWindowPathIdentifiers", {
+                detail: pageIdentifier,
+              }),
+            );
+            resolve({});
           }
-          return true;
-        },
-      );
+        } else {
+          resolve({ success: false, pageIdentifier: {} });
+        }
+        return true;
+      });
     });
   }
 
@@ -1615,19 +1572,28 @@ async function loadWidgetOnThePage() {
     statusEl.textContent = "";
 
     // Minimal view always uses "7d" preset for today/yesterday
-    const [pageData, countryData] = await Promise.all([
-      getPageData("7d"),
-      getCountryData("7d"),
-    ]);
+    const pageData = await getPageData(currentDatePreset);
+    const countryData = await getCountryData(currentDatePreset);
     if (!pageData || !countryData) {
-      hideLoading();
       statusEl.textContent = "No data available for this page.";
       return;
     }
-    hideLoading();
-    statusEl.textContent = "";
+
     renderMetrics(pageData);
     updateFilterCondition();
+
+    // If expanded view is active, also refresh charts
+    if (badge.classList.contains("expanded")) {
+      if (pageData && countryData) {
+        renderCharts(pageData, countryData);
+      }
+      // Also refresh custom report if open
+      if (tabContentCustomReport.classList.contains("active")) {
+        await fetchAndRenderCustomReport();
+      }
+    }
+    hideLoading();
+
     return;
   }
   window.updateWidgetWithPageData = updateWidgetWithPageData;
@@ -1637,29 +1603,12 @@ async function loadWidgetOnThePage() {
   // =====================
   async function refetchPageDataForSpa() {
     // Re-read page identifier based on current source
+
     let pageIdentifierResp = await fetchPageIdentifiers();
     if (pageIdentifierResp.success === true) {
       // For url/title sources, update immediately
       await updateWidgetWithPageData();
-
-      // If expanded view is active, also refresh charts
-      if (badge.classList.contains("expanded")) {
-        showLoading();
-        const pageData = await getPageData(currentDatePreset);
-        const countryData = await getCountryData(currentDatePreset);
-        hideLoading();
-        if (pageData && countryData) {
-          renderMetrics(pageData);
-          renderCharts(pageData, countryData);
-          updateFilterCondition();
-        }
-        // Also refresh custom report if open
-        if (tabContentCustomReport.classList.contains("active")) {
-          await fetchAndRenderCustomReport();
-        }
-      }
     }
-    // For 'window' source, the pageIdentifierWindowPathValue event listener handles the update
   }
   window.refetchPageDataForSpa = refetchPageDataForSpa;
 
@@ -1938,41 +1887,20 @@ async function loadWidgetOnThePage() {
     const root = badge;
     const granularity = pageData.granularity || "day";
 
-    createVerticalChart(
-      root.querySelector("#pvChart"),
-      pageData.dates,
-      pageData.pageViews,
-      granularity,
-    );
+    createVerticalChart(root.querySelector("#pvChart"), pageData.dates, pageData.pageViews, granularity);
 
-    createVerticalChart(
-      root.querySelector("#visitsChart"),
-      pageData.dates,
-      pageData.visits,
-      granularity,
-    );
+    createVerticalChart(root.querySelector("#visitsChart"), pageData.dates, pageData.visits, granularity);
 
-    createVerticalChart(
-      root.querySelector("#uvChart"),
-      pageData.dates,
-      pageData.visitors,
-      granularity,
-    );
+    createVerticalChart(root.querySelector("#uvChart"), pageData.dates, pageData.visitors, granularity);
 
-    createHorizontalChart(
-      root.querySelector("#countryChart"),
-      countryData.countries,
-      countryData.pageViews,
-    );
+    createHorizontalChart(root.querySelector("#countryChart"), countryData.countries, countryData.pageViews);
   }
 
   async function updateFilterCondition() {
     const el = badge.querySelector("#filterCondition");
     if (!el) return;
 
-    const { pageIdentifierCondition } = await chrome.storage.local.get(
-      "pageIdentifierCondition",
-    );
+    const { pageIdentifierCondition } = await chrome.storage.local.get("pageIdentifierCondition");
 
     if (!pageIdentifierCondition) {
       el.textContent = "";
@@ -1988,16 +1916,10 @@ async function loadWidgetOnThePage() {
   // =============================================
 
   async function loadCustomReportTab() {
-    const { customReportConfig: config } =
-      await chrome.storage.local.get("customReportConfig");
+    const { customReportConfig: config } = await chrome.storage.local.get("customReportConfig");
     customReportConfig = config;
 
-    if (
-      !config ||
-      !config.enabled ||
-      !config.primaryDimension?.id ||
-      !config.primaryValue
-    ) {
+    if (!config || !config.enabled || !config.primaryDimension?.id || !config.primaryValue) {
       // Disable custom report tab
       tabCustomReport.classList.add("disabled");
       tabCustomReport.classList.remove("active");
@@ -2024,8 +1946,7 @@ async function loadWidgetOnThePage() {
     const filterSep = badge.querySelector(".cr-filter-sep");
     if (config.secondaryDimension?.id) {
       // Build label like "Prop3 - Platform"
-      const secDisplay =
-        config.secondaryDimension.displayLabel || config.secondaryDimension.id;
+      const secDisplay = config.secondaryDimension.displayLabel || config.secondaryDimension.id;
       if (secondaryLabel) secondaryLabel.textContent = `${secDisplay}:`;
       if (filterSep) filterSep.style.display = "inline";
       crSecondarySelect.style.display = "inline-block";
@@ -2039,9 +1960,7 @@ async function loadWidgetOnThePage() {
   }
 
   async function populateSecondaryDropdown() {
-    const { secondaryDimensionValues } = await chrome.storage.local.get(
-      "secondaryDimensionValues",
-    );
+    const { secondaryDimensionValues } = await chrome.storage.local.get("secondaryDimensionValues");
     crSecondarySelect.innerHTML = "";
 
     // "No Filter" option
@@ -2084,15 +2003,11 @@ async function loadWidgetOnThePage() {
     // Add secondary filter if selected
     const secondaryValue = crSecondarySelect.value;
     if (secondaryValue && customReportConfig.secondaryDimension?.id) {
-      customFilters.secondaryDimension =
-        customReportConfig.secondaryDimension.id;
+      customFilters.secondaryDimension = customReportConfig.secondaryDimension.id;
       customFilters.secondaryValue = secondaryValue;
     }
 
-    const [crPageData, crCountryData] = await Promise.all([
-      getCustomReportData("pageViews", currentDatePreset, customFilters),
-      getCustomReportData("countryData", currentDatePreset, customFilters),
-    ]);
+    const [crPageData, crCountryData] = await Promise.all([getCustomReportData("pageViews", currentDatePreset, customFilters), getCustomReportData("countryData", currentDatePreset, customFilters)]);
     hideLoading();
 
     renderCustomReportMetrics(crPageData);
@@ -2135,36 +2050,13 @@ async function loadWidgetOnThePage() {
     crChartInstances = {};
 
     if (pageData) {
-      createVerticalChart(
-        root.querySelector("#crPvChart"),
-        pageData.dates,
-        pageData.pageViews,
-        granularity,
-        crChartInstances,
-      );
-      createVerticalChart(
-        root.querySelector("#crVisitsChart"),
-        pageData.dates,
-        pageData.visits,
-        granularity,
-        crChartInstances,
-      );
-      createVerticalChart(
-        root.querySelector("#crUvChart"),
-        pageData.dates,
-        pageData.visitors,
-        granularity,
-        crChartInstances,
-      );
+      createVerticalChart(root.querySelector("#crPvChart"), pageData.dates, pageData.pageViews, granularity, crChartInstances);
+      createVerticalChart(root.querySelector("#crVisitsChart"), pageData.dates, pageData.visits, granularity, crChartInstances);
+      createVerticalChart(root.querySelector("#crUvChart"), pageData.dates, pageData.visitors, granularity, crChartInstances);
     }
 
     if (countryData) {
-      createHorizontalChart(
-        root.querySelector("#crCountryChart"),
-        countryData.countries,
-        countryData.pageViews,
-        crChartInstances,
-      );
+      createHorizontalChart(root.querySelector("#crCountryChart"), countryData.countries, countryData.pageViews, crChartInstances);
     }
   }
 
@@ -2196,20 +2088,22 @@ function getPageData(datePreset = "7d") {
   return new Promise((resolve, reject) => {
     chrome.runtime.sendMessage(
       {
-        action: "GET_REPORT",
+        type: "GET_REPORT",
         pageIdentifier: pageIdentifier,
         reportType: "pageViews",
         datePreset: datePreset,
       },
       (response) => {
         if (chrome.runtime.lastError) {
+          if (globalThis.debugExtension) {
+            console.error(chrome.runtime.lastError);
+          }
           resolve(null);
           return;
         }
+
         if (response.success) {
-          response.reportData.dates = response.reportData.dates.map(
-            (dt) => dt.split(",")[0],
-          );
+          response.reportData.dates = response.reportData.dates.map((dt) => dt.split(",")[0]);
           resolve(response.reportData);
         } else {
           resolve(null);
@@ -2223,13 +2117,16 @@ function getCountryData(datePreset = "7d") {
   return new Promise((resolve, reject) => {
     chrome.runtime.sendMessage(
       {
-        action: "GET_REPORT",
+        type: "GET_REPORT",
         pageIdentifier: pageIdentifier,
         reportType: "countryData",
         datePreset: datePreset,
       },
       (response) => {
         if (chrome.runtime.lastError) {
+          if (globalThis.debugExtension) {
+            console.error(chrome.runtime.lastError);
+          }
           resolve(null);
           return;
         }
@@ -2243,15 +2140,11 @@ function getCountryData(datePreset = "7d") {
   });
 }
 
-function getCustomReportData(
-  reportType = "pageViews",
-  datePreset = "7d",
-  customFilters = {},
-) {
+function getCustomReportData(reportType = "pageViews", datePreset = "7d", customFilters = {}) {
   return new Promise((resolve, reject) => {
     chrome.runtime.sendMessage(
       {
-        action: "GET_CUSTOM_REPORT",
+        type: "GET_CUSTOM_REPORT",
         pageIdentifier: pageIdentifier,
         reportType: reportType,
         datePreset: datePreset,
@@ -2259,14 +2152,15 @@ function getCustomReportData(
       },
       (response) => {
         if (chrome.runtime.lastError) {
+          if (globalThis.debugExtension) {
+            console.error(chrome.runtime.lastError);
+          }
           resolve(null);
           return;
         }
         if (response && response.success) {
           if (reportType === "pageViews" && response.reportData?.dates) {
-            response.reportData.dates = response.reportData.dates.map(
-              (dt) => dt.split(",")[0],
-            );
+            response.reportData.dates = response.reportData.dates.map((dt) => dt.split(",")[0]);
           }
           resolve(response.reportData);
         } else {
@@ -2278,23 +2172,37 @@ function getCustomReportData(
 }
 
 async function getEnableOnPageFlag() {
-  return new Promise((resolve) => {
-    chrome.runtime.sendMessage(
-      { action: "GET_ENABLED_ON_PAGE_FLAG" },
-      (response) => {
-        if (response && typeof response.isEnabled === "boolean") {
-          resolve(response.isEnabled);
-        } else {
-          resolve(false);
-        }
-        if (chrome.runtime.lastError) {
-          return;
-        }
-      },
-    );
-  });
+  const response = await sendMessageAsync({ type: "GET_ENABLED_ON_PAGE_FLAG" });
+
+  if (response && typeof response.isEnabled === "boolean") {
+    return response.isEnabled;
+  }
+
+  return false;
 }
 
 function isDesktop() {
   return window.innerWidth >= 900;
+}
+
+function sendMessageAsync(message) {
+  return new Promise((resolve) => {
+    try {
+      chrome.runtime.sendMessage(message, (response) => {
+        if (chrome.runtime.lastError) {
+          if (globalThis.debugExtension) {
+            console.error(chrome.runtime.lastError);
+          }
+          resolve(null); // fallback
+          return;
+        }
+        resolve(response);
+      });
+    } catch (err) {
+      if (globalThis.debugExtension) {
+        console.error("[Extension Exception]", message.type, err);
+      }
+      resolve(null);
+    }
+  });
 }

@@ -9,20 +9,17 @@ const clearConfigBtn = document.getElementById("clearConfigBtn");
 const companySelect = document.getElementById("companySelect");
 const rsidSelect = document.getElementById("rsidSelect");
 const enableOnPageToggle = document.getElementById("enableOnPageToggle");
-const retrieveAccessTokenBtn = document.getElementById(
-  "retrieveAccessTokenBtn",
-);
+const retrieveAccessTokenBtn = document.getElementById("retrieveAccessTokenBtn");
 const pageIdentifierSource = document.getElementById("pageIdentifierSource");
 let messageQueue = [],
   msgCount = 1;
 
+if (globalThis.debugExtension === undefined) {
+  globalThis.debugExtension = false;
+}
+
 document.addEventListener("DOMContentLoaded", async () => {
-  const { org_id, enableOnPage, client_id: storedClientId } =
-    await chrome.storage.local.get([
-      "org_id",
-      "enableOnPage",
-      "client_id",
-    ]);
+  const { org_id, enableOnPage, client_id: storedClientId } = await chrome.storage.local.get(["org_id", "enableOnPage", "client_id"]);
   //populating step1 fields if already saved
   let client_idElem = document.getElementById("clientId");
   let client_secretElem = document.getElementById("clientSecret");
@@ -72,36 +69,13 @@ authBtn.addEventListener("click", async () => {
       });
       return;
     }
-    chrome.runtime.sendMessage(
-      {
-        type: "AUTHENTICATE_USER",
-        client_id,
-        client_secret,
-        org_id,
-        userpassword,
-      },
-      async (response) => {
-        if (response.error) {
-          showMessage({
-            msg: "Error occured while Authenticating: " + response.error,
-            type: "error",
-          });
-          return;
-        } else if (response.success) {
-          authBtn.disabled = true;
-          showMessage({
-            msg: "Authenticated and Credentials fetched!",
-            type: "success",
-          });
-          populateCompaniesAndSuites(response.companiesData);
-          await chrome.storage.local.set({ credsStored: true });
-          step2.scrollIntoView({ behavior: "smooth", block: "start" });
-        }
-        if (chrome.runtime.lastError) {
-          return;
-        }
-      },
-    );
+    chrome.runtime.sendMessage({
+      type: "AUTHENTICATE_USER",
+      client_id,
+      client_secret,
+      org_id,
+      userpassword,
+    });
   } catch (error) {
     showMessage({
       msg: "An error occurred during authentication. Please try with valid credentials.",
@@ -125,8 +99,7 @@ clearAuthBtn.addEventListener("click", async () => {
   org_idElem.value = "";
   org_idElem.disabled = false;
   rsidSelect.innerHTML = "";
-  companySelect.innerHTML =
-    "<option value='' disabled selected>Select company</option>";
+  companySelect.innerHTML = "<option value='' disabled selected>Select company</option>";
   showMessage({ msg: "Authentication cleared.", type: "info" });
   step2.style.display = "none";
   step3.style.display = "none";
@@ -173,24 +146,14 @@ async function populateCompaniesAndSuites(companiesData) {
 }
 
 async function fetchCompaniesData() {
-  return new Promise((resolve, reject) => {
-    chrome.runtime.sendMessage(
-      { type: "FETCH_COMPANIES" },
-      async (response) => {
-        if (response.success) {
-          let companiesData = response.companiesData;
-          resolve({ companiesData, success: true });
-        } else {
-          handleTokenErrorResponse(response);
-          resolve({}); // Resolve with empty object to prevent further processing
-          return;
-        }
-        if (chrome.runtime.lastError) {
-          return;
-        }
-      },
-    );
-  });
+  const response = await sendMessageAsync({ type: "FETCH_COMPANIES" });
+
+  if (response?.success) {
+    return { companiesData: response.companiesData, success: true };
+  } else {
+    handleTokenErrorResponse(response);
+    return {};
+  }
 }
 
 companySelect.addEventListener("change", async () => {
@@ -200,60 +163,51 @@ companySelect.addEventListener("change", async () => {
 
   // Clear cached dimensions since RSID will change
   allDimensions = [];
-  await chrome.storage.local.remove([
-    "dimensionsList",
-    "primaryDimensionValues",
-    "secondaryDimensionValues",
-  ]);
+  await chrome.storage.local.remove(["dimensionsList", "primaryDimensionValues", "secondaryDimensionValues"]);
 
-  chrome.runtime.sendMessage(
-    { type: "FETCH_REPORT_SUITES", companyId },
-    async (response) => {
-      if (response.success) {
-        let suitesData = response.suitesData;
-        if (
-          suitesData.content === undefined ||
-          suitesData.content.length === 0
-        ) {
-          showMessage({
-            msg: "No accesible report suites found for selected Company. Select other company or clear credentials and try again.",
-            type: "error",
-          });
-          return;
-        }
-        //defualt option
-        rsidSelect.innerHTML = "";
-        let defaultOpt = document.createElement("option");
-        defaultOpt.value = "";
-        defaultOpt.textContent = "Select report suite";
-        defaultOpt.selected = true;
-        defaultOpt.disabled = true;
-        rsidSelect.appendChild(defaultOpt);
-        suitesData.content.forEach((suite) => {
-          const opt = document.createElement("option");
-          opt.value = suite.rsid;
-          opt.textContent = `${suite.name} (${suite.rsid})`;
-          rsidSelect.appendChild(opt);
-        });
-        rsids = JSON.stringify(suitesData.content);
-        rsidSelect.disabled = false;
-        await chrome.storage.local.set({ rsidsList: rsids });
-        validateStep2AndStep3Fields();
-      } else {
-        handleTokenErrorResponse(response);
-      }
-      if (chrome.runtime.lastError) {
-        return;
-      }
-    },
-  );
+  const response = await sendMessageAsync({
+    type: "FETCH_REPORT_SUITES",
+    companyId,
+  });
+  if (!response) {
+    showMessage({ msg: "Error fetching Report.", type: "error" });
+    return;
+  }
+  if (response.success) {
+    let suitesData = response.suitesData;
+    if (suitesData.content === undefined || suitesData.content.length === 0) {
+      showMessage({
+        msg: "No accesible report suites found for selected Company. Select other company or clear credentials and try again.",
+        type: "error",
+      });
+      return;
+    }
+    //defualt option
+    rsidSelect.innerHTML = "";
+    let defaultOpt = document.createElement("option");
+    defaultOpt.value = "";
+    defaultOpt.textContent = "Select report suite";
+    defaultOpt.selected = true;
+    defaultOpt.disabled = true;
+    rsidSelect.appendChild(defaultOpt);
+    suitesData.content.forEach((suite) => {
+      const opt = document.createElement("option");
+      opt.value = suite.rsid;
+      opt.textContent = `${suite.name} (${suite.rsid})`;
+      rsidSelect.appendChild(opt);
+    });
+    rsids = JSON.stringify(suitesData.content);
+    rsidSelect.disabled = false;
+    await chrome.storage.local.set({ rsidsList: rsids });
+    validateStep2AndStep3Fields();
+  } else {
+    handleTokenErrorResponse(response);
+  }
 });
 
 function validateStep2AndStep3Fields() {
   const source = document.getElementById("pageIdentifierSource").value;
-  const adobeDimension = document
-    .getElementById("piAdobeDimension")
-    .value.trim();
+  const adobeDimension = document.getElementById("piAdobeDimension").value.trim();
   const windowPath = document.getElementById("piWindowPath").value.trim();
 
   let isValid = true;
@@ -282,13 +236,7 @@ function validateStep2AndStep3Fields() {
 }
 
 // Add event listeners to validate form on input changes
-[
-  "pageIdentifierSource",
-  "piAdobeDimension",
-  "piAdobeMatch",
-  "piWindowPath",
-  "rsidSelect",
-].forEach((id) => {
+["pageIdentifierSource", "piAdobeDimension", "piAdobeMatch", "piWindowPath", "rsidSelect"].forEach((id) => {
   const el = document.getElementById(id);
   if (el) {
     el.addEventListener("input", validateStep2AndStep3Fields);
@@ -371,15 +319,7 @@ function askUserToReauthenticate() {
   userpasswordElem.value = "";
   userpasswordElem.disabled = false;
   userpasswordElem.type = "text";
-  //remove accessToken, Refreshtoken, expires_at, encyptedVarifier, saltBase64, "credsStored"
-  chrome.storage.local.remove([
-    "accessToken",
-    "refreshToken",
-    "expires_at",
-    "encryptedVerifier",
-    "saltBase64",
-    "credsStored",
-  ]);
+  chrome.storage.local.remove(["accessToken", "refreshToken", "expires_at", "encryptedVerifier", "saltBase64", "credsStored"]);
   retrieveAccessTokenBtn.hidden = true;
 }
 
@@ -444,14 +384,7 @@ function showToast(opts = {}) {
 
   const icon = document.createElement("div");
   icon.className = "toast-icon";
-  icon.innerText =
-    type === "success"
-      ? "\u2713"
-      : type === "error"
-        ? "\u2717"
-        : type === "warning"
-          ? "\u2757"
-          : "i";
+  icon.innerText = type === "success" ? "\u2713" : type === "error" ? "\u2717" : type === "warning" ? "\u2757" : "i";
 
   const body = document.createElement("div");
   body.className = "toast-body";
@@ -529,8 +462,7 @@ function showToast(opts = {}) {
 async function clearStep2andStep3Fields() {
   rsidSelect.innerHTML = "";
   rsidSelect.disabled = true;
-  companySelect.innerHTML =
-    "<option value='' disabled selected>Select company</option>";
+  companySelect.innerHTML = "<option value='' disabled selected>Select company</option>";
   await chrome.storage.local.remove([
     "selectedCompanyID",
     "selectedrsID",
@@ -554,142 +486,17 @@ async function clearStep2andStep3Fields() {
   allDimensions = [];
   enableCustomReportCheckbox.checked = false;
   customReportConfigDiv.style.display = "none";
-  crPrimaryDimension.innerHTML =
-    '<option value="" disabled selected>Loading dimensions...</option>';
+  crPrimaryDimension.innerHTML = '<option value="" disabled selected>Loading dimensions...</option>';
   crPrimaryDimension.disabled = true;
-  crPrimaryValueSelect.innerHTML =
-    '<option value="" disabled selected>Select primary dimension first</option>';
+  crPrimaryValueSelect.innerHTML = '<option value="" disabled selected>Select primary dimension first</option>';
   crPrimaryValueSelect.disabled = true;
   crPrimaryValueCustom.value = "";
-  crSecondaryDimension.innerHTML =
-    '<option value="" disabled selected>Select primary dimension first</option>';
+  crSecondaryDimension.innerHTML = '<option value="" disabled selected>Select primary dimension first</option>';
   crSecondaryDimension.disabled = true;
 }
 
 async function populateStep2andStep3Fields(defaultSetting = false) {
-  chrome.runtime.sendMessage(
-    { type: "GET_TOKEN_VALIDITY" },
-    async (response) => {
-      if (response.success == true) {
-        const { selectedCompanyID, selectedrsID, companiesList, rsidsList } =
-          await chrome.storage.local.get([
-            "selectedCompanyID",
-            "selectedrsID",
-            "companiesList",
-            "rsidsList",
-          ]);
-        if (selectedCompanyID && selectedrsID) {
-          step2.style.display = "block";
-          step3.style.display = "block";
-          step4.style.display = "block";
-          if (companiesList) {
-            companySelect.innerHTML = "";
-            if (defaultSetting) {
-              let opt = document.createElement("option");
-              opt.value = "";
-              opt.textContent = "Select company";
-              opt.selected = true;
-              opt.disabled = true;
-              companySelect.appendChild(opt);
-            }
-            let companies = JSON.parse(companiesList);
-            companies.forEach((company) => {
-              let opt = document.createElement("option");
-              opt.value = company.globalCompanyId;
-              opt.textContent = `${company.companyName} (${company.globalCompanyId})`;
-              if (
-                selectedCompanyID &&
-                selectedCompanyID === company.globalCompanyId &&
-                !defaultSetting
-              ) {
-                opt.selected = true;
-              }
-              companySelect.appendChild(opt);
-            });
-          }
-          if (rsidsList && !defaultSetting) {
-            let rsids = JSON.parse(rsidsList);
-            rsidSelect.disabled = false;
-            rsids.forEach((suite) => {
-              const opt = document.createElement("option");
-              opt.value = suite.rsid;
-              opt.textContent = `${suite.name} (${suite.rsid})`;
-              if (selectedrsID && selectedrsID === suite.rsid) {
-                opt.selected = true;
-              }
-              rsidSelect.appendChild(opt);
-            });
-          }
-          authBtn.disabled = true;
-          let userpasswordElem = document.getElementById("userpassword");
-          userpasswordElem.value = "ABCD"; //dummy value to indicate password is set
-          userpasswordElem.disabled = true;
-          userpasswordElem.type = "password";
-        } else {
-          let resp = await fetchCompaniesData();
-          if (resp.success) {
-            populateCompaniesAndSuites(resp.companiesData);
-            let userpasswordElem = document.getElementById("userpassword");
-            userpasswordElem.value = "ABCD"; //dummy value to indicate password is set
-            userpasswordElem.disabled = true;
-            userpasswordElem.type = "password";
-          }
-          // let userpasswordElem = document.getElementById("userpassword");
-          // userpasswordElem.value = "ABCD"; //dummy value to indicate password is set
-          // userpasswordElem.disabled = true;
-          // userpasswordElem.type = "password";
-        }
-        //Add step3 fields population code here
-        const { pageIdentifierConfig } = await chrome.storage.local.get([
-          "pageIdentifierConfig",
-        ]);
-        if (pageIdentifierConfig) {
-          const cfg = pageIdentifierConfig;
-
-          document.getElementById("pageIdentifierSource").value = cfg.source;
-          togglePageIdentifierSource(cfg.source);
-          // URL
-          document.getElementById("piUrlType").value =
-            cfg.urlConfig.urlType || "full";
-          document.getElementById("piRemoveQuery").checked =
-            !!cfg.urlConfig.removeQuery;
-          document.getElementById("piRemoveHash").checked =
-            !!cfg.urlConfig.removeHash;
-
-          // Title
-          document.getElementById("piTitleTrim").checked =
-            !!cfg.titleConfig.trim;
-          document.getElementById("piTitleLowercase").checked =
-            !!cfg.titleConfig.lowercase;
-
-          // Window
-          document.getElementById("piWindowPath").value =
-            cfg.windowPathConfig.windowPath || "";
-
-          // Adobe
-          document.getElementById("piAdobeDimension").value =
-            cfg.adobeDimensionConfig.dimension || "";
-          document.getElementById("piAdobeMatch").value =
-            cfg.adobeDimensionConfig.match || "exact";
-        }
-        if (defaultSetting) {
-          document.getElementById("pageIdentifierSource").value = "url";
-          document.getElementById("piUrlType").value = "full";
-          document.getElementById("piAdobeMatch").value = "exact";
-          document.getElementById("piRemoveQuery").checked = true;
-          document.getElementById("piRemoveHash").checked = true;
-          document.getElementById("piTitleTrim").checked = true;
-        }
-        validateStep2AndStep3Fields();
-        populateCustomReportFields();
-      } else {
-        handleTokenErrorResponse(response);
-      }
-      if (chrome.runtime.lastError) {
-        return;
-      }
-    },
-  );
+  chrome.runtime.sendMessage({ type: "GET_TOKEN_VALIDITY_OPTIONS", args: { defaultSetting } });
 }
 
 async function handleTokenErrorResponse(response) {
@@ -719,14 +526,11 @@ async function handleTokenErrorResponse(response) {
 }
 
 function togglePageIdentifierSource(source) {
-  document.getElementById("pageIdUrlConfig").style.display =
-    source === "url" ? "block" : "none";
+  document.getElementById("pageIdUrlConfig").style.display = source === "url" ? "block" : "none";
 
-  document.getElementById("pageIdTitleConfig").style.display =
-    source === "title" ? "block" : "none";
+  document.getElementById("pageIdTitleConfig").style.display = source === "title" ? "block" : "none";
 
-  document.getElementById("pageIdWindowConfig").style.display =
-    source === "window" ? "block" : "none";
+  document.getElementById("pageIdWindowConfig").style.display = source === "window" ? "block" : "none";
 }
 
 pageIdentifierSource.addEventListener("change", (e) => {
@@ -744,29 +548,25 @@ retrieveAccessTokenBtn.addEventListener("click", async () => {
     return;
   }
   showMessage({ msg: "Validating password...", type: "info" });
-  chrome.runtime.sendMessage(
-    { type: "VALIDATE_PASSWORD", password: userpassword },
-    async (response) => {
-      if (response.isPasswordValid == true) {
-        showMessage({
-          msg: "Password validated. Kindly return back to website and Refresh the page to fetch data.",
-          type: "success",
-        });
-        populateStep2andStep3Fields(false);
-        retrieveAccessTokenBtn.hidden = true;
-        authBtn.disabled = true;
-      } else {
-        showMessage({
-          msg: "Invalid password. Please try again or Re-authenticate.",
-          type: "error",
-        });
-        authBtn.disabled = false;
-      }
-      if (chrome.runtime.lastError) {
-        return;
-      }
-    },
-  );
+  const response = await sendMessageAsync({
+    type: "VALIDATE_PASSWORD",
+    password: userpassword,
+  });
+  if (response.isPasswordValid == true) {
+    showMessage({
+      msg: "Password validated. Kindly return back to website and Refresh the page to fetch data.",
+      type: "success",
+    });
+    populateStep2andStep3Fields(false);
+    retrieveAccessTokenBtn.hidden = true;
+    authBtn.disabled = true;
+  } else {
+    showMessage({
+      msg: "Invalid password. Please try again or Re-authenticate.",
+      type: "error",
+    });
+    authBtn.disabled = false;
+  }
 });
 
 enableOnPageToggle.addEventListener("change", async () => {
@@ -777,8 +577,7 @@ enableOnPageToggle.addEventListener("change", async () => {
 // =============================================
 // CUSTOM REPORT — Step 4
 // =============================================
-const enableCustomReportCheckbox =
-  document.getElementById("enableCustomReport");
+const enableCustomReportCheckbox = document.getElementById("enableCustomReport");
 const customReportConfigDiv = document.getElementById("customReportConfig");
 const crPrimaryDimension = document.getElementById("crPrimaryDimension");
 const crPrimaryMatch = document.getElementById("crPrimaryMatch");
@@ -798,9 +597,7 @@ enableCustomReportCheckbox.addEventListener("change", async () => {
     await loadDimensionsIfNeeded();
   } else {
     // Disable custom report in storage so widget hides the row
-    const { customReportConfig } = await chrome.storage.local.get([
-      "customReportConfig",
-    ]);
+    const { customReportConfig } = await chrome.storage.local.get(["customReportConfig"]);
     if (customReportConfig) {
       customReportConfig.enabled = false;
       await chrome.storage.local.set({ customReportConfig });
@@ -863,10 +660,7 @@ saveCustomReportBtn.addEventListener("click", async () => {
   const secondaryDim = crSecondaryDimension.value;
 
   // Primary value: custom input if "__custom__" selected, otherwise dropdown value
-  const primaryValue =
-    primaryValueFromSelect === "__custom__"
-      ? primaryValueCustom
-      : primaryValueFromSelect;
+  const primaryValue = primaryValueFromSelect === "__custom__" ? primaryValueCustom : primaryValueFromSelect;
 
   if (!primaryDim) {
     showMessage({ msg: "Please select a Primary Dimension.", type: "error" });
@@ -908,24 +702,18 @@ saveCustomReportBtn.addEventListener("click", async () => {
 
 // Clear Custom Report config
 clearCustomReportBtn.addEventListener("click", async () => {
-  await chrome.storage.local.remove([
-    "customReportConfig",
-    "primaryDimensionValues",
-    "secondaryDimensionValues",
-  ]);
+  await chrome.storage.local.remove(["customReportConfig", "primaryDimensionValues", "secondaryDimensionValues"]);
 
   enableCustomReportCheckbox.checked = false;
   customReportConfigDiv.style.display = "none";
 
   crPrimaryDimension.value = "";
   crPrimaryMatch.value = "exact";
-  crPrimaryValueSelect.innerHTML =
-    "<option value='' disabled selected>Select primary dimension first</option>";
+  crPrimaryValueSelect.innerHTML = "<option value='' disabled selected>Select primary dimension first</option>";
   crPrimaryValueSelect.disabled = true;
   crPrimaryValueCustom.value = "";
   crPrimaryValueCustom.style.display = "none";
-  crSecondaryDimension.innerHTML =
-    "<option value='' disabled selected>Select primary dimension first</option>";
+  crSecondaryDimension.innerHTML = "<option value='' disabled selected>Select primary dimension first</option>";
   crSecondaryDimension.disabled = true;
 
   showMessage({ msg: "Custom Report configuration cleared.", type: "success" });
@@ -959,12 +747,7 @@ async function loadDimensionsIfNeeded() {
     return;
   }
 
-  const { selectedCompanyID, selectedrsID, dimensionsList } =
-    await chrome.storage.local.get([
-      "selectedCompanyID",
-      "selectedrsID",
-      "dimensionsList",
-    ]);
+  const { selectedCompanyID, selectedrsID, dimensionsList } = await chrome.storage.local.get(["selectedCompanyID", "selectedrsID", "dimensionsList"]);
 
   // Try loading from cache first
   if (dimensionsList) {
@@ -986,19 +769,21 @@ async function loadDimensionsIfNeeded() {
   }
 
   // Fetch from API
-  crPrimaryDimension.innerHTML =
-    '<option value="" disabled selected>Loading dimensions...</option>';
+  crPrimaryDimension.innerHTML = '<option value="" disabled selected>Loading dimensions...</option>';
   crPrimaryDimension.disabled = true;
 
   chrome.runtime.sendMessage(
     {
-      action: "FETCH_DIMENSIONS",
+      type: "FETCH_DIMENSIONS",
       companyId: selectedCompanyID,
       rsid: selectedrsID,
     },
     async (response) => {
       if (chrome.runtime.lastError) {
         showMessage({ msg: "Error fetching dimensions.", type: "error" });
+        if (globalThis.debugExtension) {
+          console.error(chrome.runtime.lastError);
+        }
         return;
       }
       if (response.success) {
@@ -1016,8 +801,7 @@ async function loadDimensionsIfNeeded() {
           msg: response.error || "Failed to fetch dimensions.",
           type: "error",
         });
-        crPrimaryDimension.innerHTML =
-          '<option value="" disabled selected>Failed to load</option>';
+        crPrimaryDimension.innerHTML = '<option value="" disabled selected>Failed to load</option>';
       }
     },
   );
@@ -1065,10 +849,7 @@ function populateSecondaryDimensionDropdown(excludeDimensionId) {
 }
 
 async function fetchAndPopulatePrimaryValues(dimensionId) {
-  const { selectedCompanyID, selectedrsID } = await chrome.storage.local.get([
-    "selectedCompanyID",
-    "selectedrsID",
-  ]);
+  const { selectedCompanyID, selectedrsID } = await chrome.storage.local.get(["selectedCompanyID", "selectedrsID"]);
 
   if (!selectedCompanyID || !selectedrsID) {
     showMessage({
@@ -1078,15 +859,14 @@ async function fetchAndPopulatePrimaryValues(dimensionId) {
     return;
   }
 
-  crPrimaryValueSelect.innerHTML =
-    '<option value="" disabled selected>Loading values...</option>';
+  crPrimaryValueSelect.innerHTML = '<option value="" disabled selected>Loading values...</option>';
   crPrimaryValueSelect.disabled = true;
   crPrimaryValueCustom.style.display = "none";
   crPrimaryValueCustom.value = "";
 
   chrome.runtime.sendMessage(
     {
-      action: "FETCH_DIMENSION_VALUES",
+      type: "FETCH_DIMENSION_VALUES",
       companyId: selectedCompanyID,
       rsid: selectedrsID,
       dimensionId: dimensionId,
@@ -1095,6 +875,9 @@ async function fetchAndPopulatePrimaryValues(dimensionId) {
     async (response) => {
       if (chrome.runtime.lastError) {
         showMessage({ msg: "Error fetching dimension values.", type: "error" });
+        if (globalThis.debugExtension) {
+          console.error(chrome.runtime.lastError);
+        }
         return;
       }
       if (response.success) {
@@ -1139,18 +922,14 @@ async function fetchAndPopulatePrimaryValues(dimensionId) {
           msg: response.error || "Failed to fetch dimension values.",
           type: "error",
         });
-        crPrimaryValueSelect.innerHTML =
-          '<option value="" disabled selected>Failed to load</option>';
+        crPrimaryValueSelect.innerHTML = '<option value="" disabled selected>Failed to load</option>';
       }
     },
   );
 }
 
 async function fetchAndSaveSecondaryValues(dimensionId) {
-  const { selectedCompanyID, selectedrsID } = await chrome.storage.local.get([
-    "selectedCompanyID",
-    "selectedrsID",
-  ]);
+  const { selectedCompanyID, selectedrsID } = await chrome.storage.local.get(["selectedCompanyID", "selectedrsID"]);
 
   if (!selectedCompanyID || !selectedrsID) return;
 
@@ -1159,10 +938,7 @@ async function fetchAndSaveSecondaryValues(dimensionId) {
   const primaryMatch = crPrimaryMatch.value;
   const primaryValueFromSelect = crPrimaryValueSelect.value;
   const primaryValueCustom = crPrimaryValueCustom.value.trim();
-  const primaryValue =
-    primaryValueFromSelect === "__custom__"
-      ? primaryValueCustom
-      : primaryValueFromSelect;
+  const primaryValue = primaryValueFromSelect === "__custom__" ? primaryValueCustom : primaryValueFromSelect;
 
   let segmentFilter = null;
   if (primaryDim && primaryValue) {
@@ -1178,7 +954,7 @@ async function fetchAndSaveSecondaryValues(dimensionId) {
 
   chrome.runtime.sendMessage(
     {
-      action: "FETCH_DIMENSION_VALUES",
+      type: "FETCH_DIMENSION_VALUES",
       companyId: selectedCompanyID,
       rsid: selectedrsID,
       dimensionId: dimensionId,
@@ -1186,7 +962,12 @@ async function fetchAndSaveSecondaryValues(dimensionId) {
       segmentFilter: segmentFilter,
     },
     async (response) => {
-      if (chrome.runtime.lastError) return;
+      if (chrome.runtime.lastError) {
+        if (globalThis.debugExtension) {
+          console.error(chrome.runtime.lastError);
+        }
+        return;
+      }
       if (response.success) {
         const values = response.values || [];
         await chrome.storage.local.set({
@@ -1209,9 +990,7 @@ async function fetchAndSaveSecondaryValues(dimensionId) {
 // ---------- Populate Step 4 on page load ----------
 
 async function populateCustomReportFields() {
-  const { customReportConfig } = await chrome.storage.local.get([
-    "customReportConfig",
-  ]);
+  const { customReportConfig } = await chrome.storage.local.get(["customReportConfig"]);
 
   if (!customReportConfig || !customReportConfig.enabled) {
     step4.style.display = "block";
@@ -1247,77 +1026,77 @@ async function populateCustomReportFields() {
         selectedCompanyID: null,
         selectedrsID: null,
       };
-      chrome.storage.local.get(
-        ["selectedCompanyID", "selectedrsID"],
-        (result) => {
-          if (!result.selectedCompanyID || !result.selectedrsID) {
-            resolve();
-            return;
-          }
-          chrome.runtime.sendMessage(
-            {
-              action: "FETCH_DIMENSION_VALUES",
-              companyId: result.selectedCompanyID,
-              rsid: result.selectedrsID,
-              dimensionId: customReportConfig.primaryDimension.id,
-              limit: 50,
-            },
-            async (response) => {
-              if (chrome.runtime.lastError || !response?.success) {
-                resolve();
-                return;
+      chrome.storage.local.get(["selectedCompanyID", "selectedrsID"], (result) => {
+        if (!result.selectedCompanyID || !result.selectedrsID) {
+          resolve();
+          return;
+        }
+        chrome.runtime.sendMessage(
+          {
+            type: "FETCH_DIMENSION_VALUES",
+            companyId: result.selectedCompanyID,
+            rsid: result.selectedrsID,
+            dimensionId: customReportConfig.primaryDimension.id,
+            limit: 50,
+          },
+          async (response) => {
+            if (chrome.runtime.lastError) {
+              if (globalThis.debugExtension) {
+                console.error(chrome.runtime.lastError);
               }
-              const values = response.values || [];
-              await chrome.storage.local.set({
-                primaryDimensionValues: JSON.stringify(values),
-              });
-
-              crPrimaryValueSelect.innerHTML = "";
-
-              const defaultOpt = document.createElement("option");
-              defaultOpt.value = "";
-              defaultOpt.textContent = "Select a value";
-              defaultOpt.disabled = true;
-              defaultOpt.selected = true;
-              crPrimaryValueSelect.appendChild(defaultOpt);
-
-              values.forEach((v) => {
-                const opt = document.createElement("option");
-                opt.value = v.value;
-                opt.textContent = `${v.value} (${v.count.toLocaleString()})`;
-                crPrimaryValueSelect.appendChild(opt);
-              });
-
-              const customOpt = document.createElement("option");
-              customOpt.value = "__custom__";
-              customOpt.textContent = "-- Enter custom value --";
-              crPrimaryValueSelect.appendChild(customOpt);
-
-              crPrimaryValueSelect.disabled = false;
-
-              // Now restore the saved primary value
-              if (customReportConfig.primaryValue) {
-                crPrimaryValueSelect.value = customReportConfig.primaryValue;
-                if (
-                  !crPrimaryValueSelect.value ||
-                  crPrimaryValueSelect.value === ""
-                ) {
-                  // Value not in dropdown — it was a custom value
-                  crPrimaryValueSelect.value = "__custom__";
-                  crPrimaryValueCustom.style.display = "block";
-                  crPrimaryValueCustom.value = customReportConfig.primaryValue;
-                } else {
-                  // Found in dropdown — make sure custom input stays hidden
-                  crPrimaryValueCustom.style.display = "none";
-                  crPrimaryValueCustom.value = "";
-                }
-              }
-
+              return;
+            }
+            if (!response?.success) {
               resolve();
-            },
-          );
-        },
-      );
+              return;
+            }
+            const values = response.values || [];
+            await chrome.storage.local.set({
+              primaryDimensionValues: JSON.stringify(values),
+            });
+
+            crPrimaryValueSelect.innerHTML = "";
+
+            const defaultOpt = document.createElement("option");
+            defaultOpt.value = "";
+            defaultOpt.textContent = "Select a value";
+            defaultOpt.disabled = true;
+            defaultOpt.selected = true;
+            crPrimaryValueSelect.appendChild(defaultOpt);
+
+            values.forEach((v) => {
+              const opt = document.createElement("option");
+              opt.value = v.value;
+              opt.textContent = `${v.value} (${v.count.toLocaleString()})`;
+              crPrimaryValueSelect.appendChild(opt);
+            });
+
+            const customOpt = document.createElement("option");
+            customOpt.value = "__custom__";
+            customOpt.textContent = "-- Enter custom value --";
+            crPrimaryValueSelect.appendChild(customOpt);
+
+            crPrimaryValueSelect.disabled = false;
+
+            // Now restore the saved primary value
+            if (customReportConfig.primaryValue) {
+              crPrimaryValueSelect.value = customReportConfig.primaryValue;
+              if (!crPrimaryValueSelect.value || crPrimaryValueSelect.value === "") {
+                // Value not in dropdown — it was a custom value
+                crPrimaryValueSelect.value = "__custom__";
+                crPrimaryValueCustom.style.display = "block";
+                crPrimaryValueCustom.value = customReportConfig.primaryValue;
+              } else {
+                // Found in dropdown — make sure custom input stays hidden
+                crPrimaryValueCustom.style.display = "none";
+                crPrimaryValueCustom.value = "";
+              }
+            }
+
+            resolve();
+          },
+        );
+      });
     });
 
     // Populate secondary dropdown
@@ -1331,13 +1110,192 @@ async function populateCustomReportFields() {
   }
 }
 
-chrome.runtime.onMessage.addListener(async (msg, sender, sendResponse) => {
-  if (msg.type == "RECHECK_TOKEN_STATUS") {
-    let { credsStored } = await chrome.storage.local.get(["credsStored"]);
-    if (credsStored) {
-      populateStep2andStep3Fields();
-    }
-    sendResponse();
+chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
+  // 👉 Ignore unrelated messages (VERY IMPORTANT)
+  if (message.type !== "RECHECK_TOKEN_STATUS" && message.type !== "GET_TOKEN_VALIDITY_OPTIONS_RESPONSE" && message.type !== "AUTHENTICATE_USER_RESPONSE") {
+    return;
   }
-  return true;
+
+  (async () => {
+    try {
+      switch (message.type) {
+        case "RECHECK_TOKEN_STATUS": {
+          const { credsStored } = await chrome.storage.local.get(["credsStored"]);
+          if (credsStored) {
+            populateStep2andStep3Fields();
+          }
+          break;
+        }
+
+        case "GET_TOKEN_VALIDITY_OPTIONS_RESPONSE": {
+          if (message.success === true) {
+            const { selectedCompanyID, selectedrsID, companiesList, rsidsList } = await chrome.storage.local.get(["selectedCompanyID", "selectedrsID", "companiesList", "rsidsList"]);
+
+            let defaultSetting = message.args?.defaultSetting;
+
+            if (selectedCompanyID && selectedrsID) {
+              step2.style.display = "block";
+              step3.style.display = "block";
+              step4.style.display = "block";
+
+              if (companiesList) {
+                companySelect.innerHTML = "";
+
+                if (defaultSetting) {
+                  let opt = document.createElement("option");
+                  opt.value = "";
+                  opt.textContent = "Select company";
+                  opt.selected = true;
+                  opt.disabled = true;
+                  companySelect.appendChild(opt);
+                }
+
+                let companies = JSON.parse(companiesList);
+                companies.forEach((company) => {
+                  let opt = document.createElement("option");
+                  opt.value = company.globalCompanyId;
+                  opt.textContent = `${company.companyName} (${company.globalCompanyId})`;
+
+                  if (selectedCompanyID && selectedCompanyID === company.globalCompanyId && !defaultSetting) {
+                    opt.selected = true;
+                  }
+
+                  companySelect.appendChild(opt);
+                });
+              }
+
+              if (rsidsList && !defaultSetting) {
+                let rsids = JSON.parse(rsidsList);
+                rsidSelect.disabled = false;
+
+                rsids.forEach((suite) => {
+                  const opt = document.createElement("option");
+                  opt.value = suite.rsid;
+                  opt.textContent = `${suite.name} (${suite.rsid})`;
+
+                  if (selectedrsID && selectedrsID === suite.rsid) {
+                    opt.selected = true;
+                  }
+
+                  rsidSelect.appendChild(opt);
+                });
+              }
+
+              authBtn.disabled = true;
+
+              let userpasswordElem = document.getElementById("userpassword");
+              userpasswordElem.value = "ABCD";
+              userpasswordElem.disabled = true;
+              userpasswordElem.type = "password";
+            } else {
+              let resp = await fetchCompaniesData();
+
+              if (resp.success) {
+                populateCompaniesAndSuites(resp.companiesData);
+
+                let userpasswordElem = document.getElementById("userpassword");
+                userpasswordElem.value = "ABCD";
+                userpasswordElem.disabled = true;
+                userpasswordElem.type = "password";
+              }
+            }
+
+            const { pageIdentifierConfig } = await chrome.storage.local.get(["pageIdentifierConfig"]);
+
+            if (pageIdentifierConfig) {
+              const cfg = pageIdentifierConfig;
+
+              document.getElementById("pageIdentifierSource").value = cfg.source;
+              togglePageIdentifierSource(cfg.source);
+
+              document.getElementById("piUrlType").value = cfg.urlConfig.urlType || "full";
+              document.getElementById("piRemoveQuery").checked = !!cfg.urlConfig.removeQuery;
+              document.getElementById("piRemoveHash").checked = !!cfg.urlConfig.removeHash;
+
+              document.getElementById("piTitleTrim").checked = !!cfg.titleConfig.trim;
+              document.getElementById("piTitleLowercase").checked = !!cfg.titleConfig.lowercase;
+
+              document.getElementById("piWindowPath").value = cfg.windowPathConfig.windowPath || "";
+
+              document.getElementById("piAdobeDimension").value = cfg.adobeDimensionConfig.dimension || "";
+              document.getElementById("piAdobeMatch").value = cfg.adobeDimensionConfig.match || "exact";
+            }
+
+            if (defaultSetting) {
+              document.getElementById("pageIdentifierSource").value = "url";
+              document.getElementById("piUrlType").value = "full";
+              document.getElementById("piAdobeMatch").value = "exact";
+              document.getElementById("piRemoveQuery").checked = true;
+              document.getElementById("piRemoveHash").checked = true;
+              document.getElementById("piTitleTrim").checked = true;
+            }
+
+            validateStep2AndStep3Fields();
+            populateCustomReportFields();
+          } else {
+            handleTokenErrorResponse(message);
+          }
+
+          break;
+        }
+
+        case "AUTHENTICATE_USER_RESPONSE": {
+          if (message.error) {
+            showMessage({
+              msg: "Error occured while Authenticating: " + message.error,
+              type: "error",
+            });
+            return;
+          }
+
+          if (message.success) {
+            authBtn.disabled = true;
+
+            showMessage({
+              msg: "Authenticated and Credentials fetched!",
+              type: "success",
+            });
+
+            populateCompaniesAndSuites(message.companiesData);
+
+            await chrome.storage.local.set({ credsStored: true });
+
+            step2.scrollIntoView({ behavior: "smooth", block: "start" });
+          }
+
+          break;
+        }
+      }
+    } catch (err) {
+      console.error("Options listener error:", err);
+    }
+  })();
+
+  // ❗ DO NOT return true
 });
+
+function sendResponseMessage(type, payload) {
+  chrome.runtime.sendMessage({ type, ...payload });
+}
+
+function sendMessageAsync(message) {
+  return new Promise((resolve) => {
+    try {
+      chrome.runtime.sendMessage(message, (response) => {
+        if (chrome.runtime.lastError) {
+          if (globalThis.debugExtension) {
+            console.error("[Extension Error]", message.type, chrome.runtime.lastError);
+          }
+          resolve(null); // fallback
+          return;
+        }
+        resolve(response);
+      });
+    } catch (err) {
+      if (globalThis.debugExtension) {
+        console.error("[Extension Exception]", message.type, err);
+      }
+      resolve(null);
+    }
+  });
+}
