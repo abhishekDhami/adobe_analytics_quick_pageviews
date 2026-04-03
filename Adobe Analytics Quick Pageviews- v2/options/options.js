@@ -14,6 +14,10 @@ const pageIdentifierSource = document.getElementById("pageIdentifierSource");
 let messageQueue = [],
   msgCount = 1;
 
+if (globalThis.debugExtension === undefined) {
+  globalThis.debugExtension = false;
+}
+
 document.addEventListener("DOMContentLoaded", async () => {
   const { org_id, enableOnPage, client_id: storedClientId } = await chrome.storage.local.get(["org_id", "enableOnPage", "client_id"]);
   //populating step1 fields if already saved
@@ -142,21 +146,14 @@ async function populateCompaniesAndSuites(companiesData) {
 }
 
 async function fetchCompaniesData() {
-  return new Promise((resolve, reject) => {
-    chrome.runtime.sendMessage({ type: "FETCH_COMPANIES" }, async (response) => {
-      if (response.success) {
-        let companiesData = response.companiesData;
-        resolve({ companiesData, success: true });
-      } else {
-        handleTokenErrorResponse(response);
-        resolve({}); // Resolve with empty object to prevent further processing
-        return;
-      }
-      if (chrome.runtime.lastError) {
-        return;
-      }
-    });
-  });
+  const response = await sendMessageAsync({ type: "FETCH_COMPANIES" });
+
+  if (response?.success) {
+    return { companiesData: response.companiesData, success: true };
+  } else {
+    handleTokenErrorResponse(response);
+    return {};
+  }
 }
 
 companySelect.addEventListener("change", async () => {
@@ -168,41 +165,44 @@ companySelect.addEventListener("change", async () => {
   allDimensions = [];
   await chrome.storage.local.remove(["dimensionsList", "primaryDimensionValues", "secondaryDimensionValues"]);
 
-  chrome.runtime.sendMessage({ type: "FETCH_REPORT_SUITES", companyId }, async (response) => {
-    if (response.success) {
-      let suitesData = response.suitesData;
-      if (suitesData.content === undefined || suitesData.content.length === 0) {
-        showMessage({
-          msg: "No accesible report suites found for selected Company. Select other company or clear credentials and try again.",
-          type: "error",
-        });
-        return;
-      }
-      //defualt option
-      rsidSelect.innerHTML = "";
-      let defaultOpt = document.createElement("option");
-      defaultOpt.value = "";
-      defaultOpt.textContent = "Select report suite";
-      defaultOpt.selected = true;
-      defaultOpt.disabled = true;
-      rsidSelect.appendChild(defaultOpt);
-      suitesData.content.forEach((suite) => {
-        const opt = document.createElement("option");
-        opt.value = suite.rsid;
-        opt.textContent = `${suite.name} (${suite.rsid})`;
-        rsidSelect.appendChild(opt);
+  const response = await sendMessageAsync({
+    type: "FETCH_REPORT_SUITES",
+    companyId,
+  });
+  if (!response) {
+    showMessage({ msg: "Error fetching Report.", type: "error" });
+    return;
+  }
+  if (response.success) {
+    let suitesData = response.suitesData;
+    if (suitesData.content === undefined || suitesData.content.length === 0) {
+      showMessage({
+        msg: "No accesible report suites found for selected Company. Select other company or clear credentials and try again.",
+        type: "error",
       });
-      rsids = JSON.stringify(suitesData.content);
-      rsidSelect.disabled = false;
-      await chrome.storage.local.set({ rsidsList: rsids });
-      validateStep2AndStep3Fields();
-    } else {
-      handleTokenErrorResponse(response);
-    }
-    if (chrome.runtime.lastError) {
       return;
     }
-  });
+    //defualt option
+    rsidSelect.innerHTML = "";
+    let defaultOpt = document.createElement("option");
+    defaultOpt.value = "";
+    defaultOpt.textContent = "Select report suite";
+    defaultOpt.selected = true;
+    defaultOpt.disabled = true;
+    rsidSelect.appendChild(defaultOpt);
+    suitesData.content.forEach((suite) => {
+      const opt = document.createElement("option");
+      opt.value = suite.rsid;
+      opt.textContent = `${suite.name} (${suite.rsid})`;
+      rsidSelect.appendChild(opt);
+    });
+    rsids = JSON.stringify(suitesData.content);
+    rsidSelect.disabled = false;
+    await chrome.storage.local.set({ rsidsList: rsids });
+    validateStep2AndStep3Fields();
+  } else {
+    handleTokenErrorResponse(response);
+  }
 });
 
 function validateStep2AndStep3Fields() {
@@ -548,26 +548,25 @@ retrieveAccessTokenBtn.addEventListener("click", async () => {
     return;
   }
   showMessage({ msg: "Validating password...", type: "info" });
-  chrome.runtime.sendMessage({ type: "VALIDATE_PASSWORD", password: userpassword }, async (response) => {
-    if (response.isPasswordValid == true) {
-      showMessage({
-        msg: "Password validated. Kindly return back to website and Refresh the page to fetch data.",
-        type: "success",
-      });
-      populateStep2andStep3Fields(false);
-      retrieveAccessTokenBtn.hidden = true;
-      authBtn.disabled = true;
-    } else {
-      showMessage({
-        msg: "Invalid password. Please try again or Re-authenticate.",
-        type: "error",
-      });
-      authBtn.disabled = false;
-    }
-    if (chrome.runtime.lastError) {
-      return;
-    }
+  const response = await sendMessageAsync({
+    type: "VALIDATE_PASSWORD",
+    password: userpassword,
   });
+  if (response.isPasswordValid == true) {
+    showMessage({
+      msg: "Password validated. Kindly return back to website and Refresh the page to fetch data.",
+      type: "success",
+    });
+    populateStep2andStep3Fields(false);
+    retrieveAccessTokenBtn.hidden = true;
+    authBtn.disabled = true;
+  } else {
+    showMessage({
+      msg: "Invalid password. Please try again or Re-authenticate.",
+      type: "error",
+    });
+    authBtn.disabled = false;
+  }
 });
 
 enableOnPageToggle.addEventListener("change", async () => {
@@ -782,6 +781,9 @@ async function loadDimensionsIfNeeded() {
     async (response) => {
       if (chrome.runtime.lastError) {
         showMessage({ msg: "Error fetching dimensions.", type: "error" });
+        if (globalThis.debugExtension) {
+          console.error(chrome.runtime.lastError);
+        }
         return;
       }
       if (response.success) {
@@ -873,6 +875,9 @@ async function fetchAndPopulatePrimaryValues(dimensionId) {
     async (response) => {
       if (chrome.runtime.lastError) {
         showMessage({ msg: "Error fetching dimension values.", type: "error" });
+        if (globalThis.debugExtension) {
+          console.error(chrome.runtime.lastError);
+        }
         return;
       }
       if (response.success) {
@@ -957,7 +962,12 @@ async function fetchAndSaveSecondaryValues(dimensionId) {
       segmentFilter: segmentFilter,
     },
     async (response) => {
-      if (chrome.runtime.lastError) return;
+      if (chrome.runtime.lastError) {
+        if (globalThis.debugExtension) {
+          console.error(chrome.runtime.lastError);
+        }
+        return;
+      }
       if (response.success) {
         const values = response.values || [];
         await chrome.storage.local.set({
@@ -1030,7 +1040,13 @@ async function populateCustomReportFields() {
             limit: 50,
           },
           async (response) => {
-            if (chrome.runtime.lastError || !response?.success) {
+            if (chrome.runtime.lastError) {
+              if (globalThis.debugExtension) {
+                console.error(chrome.runtime.lastError);
+              }
+              return;
+            }
+            if (!response?.success) {
               resolve();
               return;
             }
@@ -1260,4 +1276,26 @@ chrome.runtime.onMessage.addListener((message, sender, sendResponse) => {
 
 function sendResponseMessage(type, payload) {
   chrome.runtime.sendMessage({ type, ...payload });
+}
+
+function sendMessageAsync(message) {
+  return new Promise((resolve) => {
+    try {
+      chrome.runtime.sendMessage(message, (response) => {
+        if (chrome.runtime.lastError) {
+          if (globalThis.debugExtension) {
+            console.error("[Extension Error]", message.type, chrome.runtime.lastError);
+          }
+          resolve(null); // fallback
+          return;
+        }
+        resolve(response);
+      });
+    } catch (err) {
+      if (globalThis.debugExtension) {
+        console.error("[Extension Exception]", message.type, err);
+      }
+      resolve(null);
+    }
+  });
 }

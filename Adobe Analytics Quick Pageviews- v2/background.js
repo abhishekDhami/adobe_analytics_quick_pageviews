@@ -8,6 +8,10 @@ const SESSION_TIMEOUT_MS = 4 * 60 * 60 * 1000; // 4 hours
 const WRAPPED_KEY_STORAGE = "wrappedSessionKey";
 const DERIVED_KEY_SESSION = "derivedKeyCache";
 
+if (globalThis.debugExtension === undefined) {
+  globalThis.debugExtension = false;
+}
+
 // =====================
 // Date Preset Helpers
 // =====================
@@ -1362,4 +1366,26 @@ async function getCachedDerivedKey() {
   const raw = Uint8Array.from(atob(res[DERIVED_KEY_SESSION]), (c) => c.charCodeAt(0));
 
   return crypto.subtle.importKey("raw", raw, { name: "AES-GCM" }, false, ["encrypt", "decrypt", "wrapKey", "unwrapKey"]);
+}
+
+function sendMessageAsync(message) {
+  return new Promise((resolve) => {
+    try {
+      chrome.runtime.sendMessage(message, (response) => {
+        if (chrome.runtime.lastError) {
+          if (globalThis.debugExtension) {
+            console.error("[Extension Error]", message.type, chrome.runtime.lastError);
+          }
+          resolve(null); // fallback
+          return;
+        }
+        resolve(response);
+      });
+    } catch (err) {
+      if (globalThis.debugExtension) {
+        console.error("[Extension Exception]", message.type, err);
+      }
+      resolve(null);
+    }
+  });
 }

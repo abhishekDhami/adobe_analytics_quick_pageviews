@@ -8,6 +8,10 @@ let currentDatePreset = "7d"; // default preset
 let spaDebounceTimer = null;
 const SPA_DEBOUNCE_MS = 1500; // debounce SPA navigation re-fetches
 
+if (globalThis.debugExtension === undefined) {
+  globalThis.debugExtension = false;
+}
+
 function inInitCharts() {
   Chart.defaults.color = "#ddd";
   Chart.defaults.borderColor = "#333";
@@ -77,28 +81,16 @@ function delay(seconds) {
 // =====================
 // Date Preset Helpers
 // =====================
-function getSavedDatePreset() {
-  return new Promise((resolve) => {
-    chrome.runtime.sendMessage({ type: "GET_DATE_PRESET" }, (response) => {
-      if (chrome.runtime.lastError) {
-        resolve("7d");
-        return;
-      }
-      resolve(response?.datePreset || "7d");
-    });
-  });
+async function getSavedDatePreset() {
+  const response = await sendMessageAsync({ type: "GET_DATE_PRESET" });
+
+  if (!response) return "7d";
+
+  return response.datePreset || "7d";
 }
 
-function saveDatePreset(preset) {
-  return new Promise((resolve) => {
-    chrome.runtime.sendMessage({ type: "SET_DATE_PRESET", datePreset: preset }, (response) => {
-      if (chrome.runtime.lastError) {
-        resolve();
-        return;
-      }
-      resolve();
-    });
-  });
+async function saveDatePreset(preset) {
+  await sendMessageAsync({ type: "SET_DATE_PRESET", datePreset: preset });
 }
 
 const DATE_PRESET_LABELS = {
@@ -1458,6 +1450,9 @@ async function loadWidgetOnThePage() {
   reauthBtn.addEventListener("click", () => {
     chrome.runtime.sendMessage({ type: "OPEN_EXTENSION_OPTION" }, (response) => {
       if (chrome.runtime.lastError) {
+        if (globalThis.debugExtension) {
+          console.error(chrome.runtime.lastError);
+        }
         return;
       }
     });
@@ -1515,13 +1510,16 @@ async function loadWidgetOnThePage() {
   async function checkTokenValidity() {
     return new Promise((resolve) => {
       chrome.runtime.sendMessage({ type: "GET_TOKEN_VALIDITY_CONTENT" }, (response) => {
+        if (chrome.runtime.lastError) {
+          if (globalThis.debugExtension) {
+            console.error(chrome.runtime.lastError);
+          }
+          return;
+        }
         if (response && response.success) {
           resolve(true);
         } else {
           resolve(false);
-        }
-        if (chrome.runtime.lastError) {
-          return;
         }
       });
     });
@@ -1574,16 +1572,28 @@ async function loadWidgetOnThePage() {
     statusEl.textContent = "";
 
     // Minimal view always uses "7d" preset for today/yesterday
-    const [pageData, countryData] = await Promise.all([getPageData("7d"), getCountryData("7d")]);
+    const pageData = await getPageData(currentDatePreset);
+    const countryData = await getCountryData(currentDatePreset);
     if (!pageData || !countryData) {
-      hideLoading();
       statusEl.textContent = "No data available for this page.";
       return;
     }
-    hideLoading();
-    statusEl.textContent = "";
+
     renderMetrics(pageData);
     updateFilterCondition();
+
+    // If expanded view is active, also refresh charts
+    if (badge.classList.contains("expanded")) {
+      if (pageData && countryData) {
+        renderCharts(pageData, countryData);
+      }
+      // Also refresh custom report if open
+      if (tabContentCustomReport.classList.contains("active")) {
+        await fetchAndRenderCustomReport();
+      }
+    }
+    hideLoading();
+
     return;
   }
   window.updateWidgetWithPageData = updateWidgetWithPageData;
@@ -1593,29 +1603,12 @@ async function loadWidgetOnThePage() {
   // =====================
   async function refetchPageDataForSpa() {
     // Re-read page identifier based on current source
+
     let pageIdentifierResp = await fetchPageIdentifiers();
     if (pageIdentifierResp.success === true) {
       // For url/title sources, update immediately
       await updateWidgetWithPageData();
-
-      // If expanded view is active, also refresh charts
-      if (badge.classList.contains("expanded")) {
-        showLoading();
-        const pageData = await getPageData(currentDatePreset);
-        const countryData = await getCountryData(currentDatePreset);
-        hideLoading();
-        if (pageData && countryData) {
-          renderMetrics(pageData);
-          renderCharts(pageData, countryData);
-          updateFilterCondition();
-        }
-        // Also refresh custom report if open
-        if (tabContentCustomReport.classList.contains("active")) {
-          await fetchAndRenderCustomReport();
-        }
-      }
     }
-    // For 'window' source, the pageIdentifierWindowPathValue event listener handles the update
   }
   window.refetchPageDataForSpa = refetchPageDataForSpa;
 
@@ -2102,9 +2095,13 @@ function getPageData(datePreset = "7d") {
       },
       (response) => {
         if (chrome.runtime.lastError) {
+          if (globalThis.debugExtension) {
+            console.error(chrome.runtime.lastError);
+          }
           resolve(null);
           return;
         }
+
         if (response.success) {
           response.reportData.dates = response.reportData.dates.map((dt) => dt.split(",")[0]);
           resolve(response.reportData);
@@ -2127,6 +2124,9 @@ function getCountryData(datePreset = "7d") {
       },
       (response) => {
         if (chrome.runtime.lastError) {
+          if (globalThis.debugExtension) {
+            console.error(chrome.runtime.lastError);
+          }
           resolve(null);
           return;
         }
@@ -2152,6 +2152,9 @@ function getCustomReportData(reportType = "pageViews", datePreset = "7d", custom
       },
       (response) => {
         if (chrome.runtime.lastError) {
+          if (globalThis.debugExtension) {
+            console.error(chrome.runtime.lastError);
+          }
           resolve(null);
           return;
         }
@@ -2168,22 +2171,38 @@ function getCustomReportData(reportType = "pageViews", datePreset = "7d", custom
   });
 }
 
-function getEnableOnPageFlag() {
-  return new Promise((resolve) => {
-    chrome.runtime.sendMessage({ type: "GET_ENABLED_ON_PAGE_FLAG" }, (response) => {
-      debugger;
-      if (response && typeof response.isEnabled === "boolean") {
-        resolve(response.isEnabled);
-      } else {
-        resolve(false);
-      }
-      if (chrome.runtime.lastError) {
-        resolve(false);
-      }
-    });
-  });
+async function getEnableOnPageFlag() {
+  const response = await sendMessageAsync({ type: "GET_ENABLED_ON_PAGE_FLAG" });
+
+  if (response && typeof response.isEnabled === "boolean") {
+    return response.isEnabled;
+  }
+
+  return false;
 }
 
 function isDesktop() {
   return window.innerWidth >= 900;
+}
+
+function sendMessageAsync(message) {
+  return new Promise((resolve) => {
+    try {
+      chrome.runtime.sendMessage(message, (response) => {
+        if (chrome.runtime.lastError) {
+          if (globalThis.debugExtension) {
+            console.error(chrome.runtime.lastError);
+          }
+          resolve(null); // fallback
+          return;
+        }
+        resolve(response);
+      });
+    } catch (err) {
+      if (globalThis.debugExtension) {
+        console.error("[Extension Exception]", message.type, err);
+      }
+      resolve(null);
+    }
+  });
 }
