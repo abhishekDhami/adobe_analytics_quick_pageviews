@@ -1,4 +1,4 @@
-# Adobe Analytics Quick PageViews
+# Analytics Quick PageViews
 
 A lightweight Chrome extension that shows Adobe Analytics PageViews, Visits, Visitors, and Country breakdown directly on any webpage — without opening Workspace.
 
