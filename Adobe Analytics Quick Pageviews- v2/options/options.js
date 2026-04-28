@@ -164,11 +164,13 @@ companySelect.addEventListener("change", async () => {
   // Clear cached dimensions since RSID will change
   allDimensions = [];
   await chrome.storage.local.remove(["dimensionsList", "primaryDimensionValues", "secondaryDimensionValues"]);
+  debugger;
 
   const response = await sendMessageAsync({
     type: "FETCH_REPORT_SUITES",
     companyId,
   });
+
   if (!response) {
     showMessage({ msg: "Error fetching Report.", type: "error" });
     return;
@@ -762,7 +764,7 @@ async function loadDimensionsIfNeeded() {
 
   if (!selectedCompanyID || !selectedrsID) {
     showMessage({
-      msg: "Please select Company and Report Suite first (Step 2).",
+      msg: "Please select Company and Report Suite and Save Configuration first (Step 2).",
       type: "error",
     });
     return;

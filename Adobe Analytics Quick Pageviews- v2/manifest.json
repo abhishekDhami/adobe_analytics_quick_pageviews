@@ -1,7 +1,7 @@
 {
   "manifest_version": 3,
   "name": "Analytics Quick PageViews",
-  "version": "2.1.1",
+  "version": "2.1.2",
   "description": "Quickly view page views on your site using Adobe Analytics. Lightweight and secure tool for debugging tracking.",
   "icons": {
     "16": "icons/icon.png",
@@ -15,7 +15,7 @@
   },
   "options_page": "options/aph_options.html",
   "action": {
-    "default_title": "Adobe Analytics Quick PageViews"
+    "default_title": "Analytics Quick PageViews"
   },
   "content_scripts": [
     {

@@ -640,7 +640,7 @@ function resetSessionTimer() {
 }
 
 // Listen for messages from options or popup
-chrome.runtime.onMessage.addListener((msg, sender) => {
+chrome.runtime.onMessage.addListener((msg, sender, sendResponse) => {
   let args = msg.args || {};
 
   const handlers = {
@@ -766,9 +766,6 @@ chrome.runtime.onMessage.addListener((msg, sender) => {
       return { success: true };
     },
 
-    // =========================
-    // 🔥 FIXED (your issue)
-    // =========================
     GET_ENABLED_ON_PAGE_FLAG: async () => {
       const isEnabled = await getEnableOnPageFlag();
       return { isEnabled };
@@ -826,12 +823,28 @@ chrome.runtime.onMessage.addListener((msg, sender) => {
       return await getCustomReport(msg.pageIdentifier, msg.reportType, msg.datePreset, msg.customFilters);
     },
   };
-
   if (handlers[msg.type]) {
-    return handlers[msg.type](msg, sender);
+    const result = handlers[msg.type](msg, sender);
+
+    // 🔥 IMPORTANT: handle both Promise + sync
+    if (result instanceof Promise) {
+      result
+        .then((res) => sendResponse(res))
+        .catch((err) => {
+          if (globalThis.debugExtension) {
+            console.error("Handler error:", msg.type, err);
+          }
+          sendResponse({ success: false, error: err.message });
+        });
+      return true; // keep channel open (Edge needs this)
+    } else {
+      sendResponse(result);
+      return false;
+    }
   }
 
-  return Promise.resolve({ success: false, error: "Unknown message type" });
+  sendResponse({ success: false, error: "Unknown message type" });
+  return false;
 });
 
 function sendResponseMessage(type, payload, args) {
